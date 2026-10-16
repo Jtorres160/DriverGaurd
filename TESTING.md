@@ -1,5 +1,9 @@
 # Testing
 
+## Phase 4 safe follow-up — October 15, 2026
+
+From `E:\Cursor\DriveGaurd`, the mocked suite passed **63/63**, exit `0`, after adding regression coverage for a completed Restore followed by an external DWORD `1` policy change. Restore now refuses to use a `Restored` recovery record to overwrite that later external value. The read-only Windows 11 harness passed its snapshot comparison self-check, ran the same 63 mocked checks, and exited `2`: native Diagnose remained partial because structured driver-store enumeration required elevation. The harness reported unchanged WindowsUpdate policy values and DriverGuard state-file hashes. PowerShell 5.1 parsed the three changed scripts with zero syntax errors. No live policy write, elevation, reboot, GPU installation, or package deletion was performed. Phase 4A and 4B live scenarios remain pending the gates in [WINDOWS11_VALIDATION.md](WINDOWS11_VALIDATION.md).
+
 ## Phase 4 preparation and read-only result — October 15, 2026
 
 On the current Windows 11 IoT Enterprise LTSC build 26100 host, these commands were run from the repository root:

@@ -262,6 +262,7 @@ function Restore-Protection {
         Write-Host 'Interrupted operation reconciled: original policy was already intact.'; return
     }
     if ($backup.Phase -eq 'Restored' -and (Test-OriginalState $state $backup)) { Write-Host 'Original state is already restored.'; return }
+    if ($backup.Phase -eq 'Restored') { throw 'Policy changed after DriverGuard restored the original state; restoration refused.' }
     if (-not ($state.Type -eq 'DWord' -and $state.Value -eq '1') -and -not (Test-OriginalState $state $backup)) { throw 'Current policy differs from DriverGuard s last write; restoration refused.' }
     Write-Host "Recorded original: $(if ($backup.OriginalValueExists -eq 'True') {"$($backup.OriginalType) $($backup.OriginalValue)"} else {'value absent'})."
     if (-not (Confirm-Yes 'Restore this exact value?')) { Write-Host 'Cancelled.'; return }

@@ -1,5 +1,9 @@
 # Windows 11 validation checklist
 
+## Phase 4 read-only follow-up — October 15, 2026
+
+Mocked suite: 63 passed, 0 failed, exit `0`. `tests\Windows11.Validation.ps1 -Mode ReadOnly`: snapshot comparison self-check passed, embedded mocked suite 63/63, native Diagnose exit `2` due to `Get-WindowsDriver -Online` requiring elevation, overall exit `2`, monitored policy and DriverGuard state-file hashes unchanged. The host reported one NVIDIA GeForce RTX 4080 SUPER with active `oem23.inf`; PnPUtil listed five staged Display packages, which were not treated as active associations. No policy cycle or reboot was run. The scenario matrix below remains untested on a recoverable isolated machine.
+
 ## Phase 4 execution record — October 15, 2026
 
 **Disposition:** Read-only validation completed; live Phase 4A and 4B deferred. Current host: Windows 11 IoT Enterprise LTSC, version `10.0.26100`, build `26100`, standard-user session. `Win32_ComputerSystem` reports `Gigabyte Technology Co., Ltd. X870 GAMING WIFI6` and `HypervisorPresent=False`; an isolated Windows test environment and usable VM snapshot or equivalent recovery mechanism were not confirmed. Explicit approval for a live policy cycle was not given.

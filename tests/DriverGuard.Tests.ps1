@@ -152,6 +152,10 @@ Restore-Protection | Out-Null
 Check ($script:policy.Value -eq '0') 'A08 DWORD zero restored'
 Enable-Protection | Out-Null
 Check ($script:simBackup.OriginalValue -eq '0') 'Reenable after restore preserves first backup'
+Restore-Protection | Out-Null
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
+Throws { Restore-Protection } 'Restored backup cannot authorize overwrite of external value one'
+Check ($script:policy.Value -eq '1' -and $script:simBackup.Phase -eq 'Restored') 'External value and restored backup remain intact'
 $script:simBackup=$null
 $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
 Enable-Protection | Out-Null

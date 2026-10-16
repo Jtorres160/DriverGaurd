@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-10-15. This is a current-state handoff, not a substitute for source inspection. Follow the workflow in [AGENTS.md](../AGENTS.md) and check recent commits before work.
 
+Phase 4 safe follow-up: `Restore-Protection` now refuses a later external change when its backup phase is `Restored`; the prior implementation could overwrite an external DWORD `1` using a stale recovery record. The read-only validation harness compares snapshot fields independent of registry enumeration order and preserves binary or array value content. Mocked suite: 63/63; native read-only harness: partial exit `2` because structured driver-store inventory needs elevation, with monitored state unchanged. Live Phase 4A/4B tests remain unperformed.
+
 Phase 4 preparation on 2026-10-15 added an execution matrix and read-only result in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md) and [TESTING.md](../TESTING.md). The implementation and safety model are unchanged. The current Windows 11 IoT Enterprise LTSC build 26100 host was not confirmed isolated or recoverable by snapshot, so no live policy cycle, reboot, or GPU operation was run. The safe mocked suite again passed 61/61; read-only native validation was partial (`2`) because structured driver-store inventory required elevation, with unchanged monitored policy and state-file hashes. Phase 4A/4B native outcomes remain pending the documented gates.
 
 ## Project and source map

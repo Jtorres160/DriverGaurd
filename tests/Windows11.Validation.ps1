@@ -28,7 +28,10 @@ function Get-Snapshot {
                 foreach ($name in $key.GetValueNames()) {
                     $kind=$key.GetValueKind($name).ToString()
                     $data=$key.GetValue($name,$null,[Microsoft.Win32.RegistryValueOptions]::DoNotExpandEnvironmentNames)
-                    $values[$name]="$kind : $data"
+                    if ($data -is [byte[]]) { $display=[Convert]::ToBase64String($data) }
+                    elseif ($data -is [array]) { $display=ConvertTo-Json -InputObject $data -Compress -Depth 5 }
+                    else { $display=[string]$data }
+                    $values[$name]="$kind : $display"
                 }
             } finally { $key.Dispose() }
         }
@@ -41,9 +44,15 @@ function Get-Snapshot {
     return [pscustomobject]@{ PolicyKeyExists=($null -ne $key); PolicyValues=$values; StateFiles=$files }
 }
 function Compare-Snapshot($Before,$After) {
-    $beforeJson=ConvertTo-Json $Before -Depth 5 -Compress
-    $afterJson=ConvertTo-Json $After -Depth 5 -Compress
-    return $beforeJson -ceq $afterJson
+    if ($Before.PolicyKeyExists -ne $After.PolicyKeyExists) { return $false }
+    foreach ($property in @('PolicyValues','StateFiles')) {
+        $left=$Before.$property; $right=$After.$property
+        if ($left.Count -ne $right.Count) { return $false }
+        foreach ($name in $left.Keys) {
+            if (-not $right.ContainsKey($name) -or $left[$name] -cne $right[$name]) { return $false }
+        }
+    }
+    return $true
 }
 function Invoke-DriverGuard([string]$Action) {
     Write-Host "Running DriverGuard $Action"
@@ -84,6 +93,13 @@ if ($Mode -eq 'PolicyCycle') {
 }
 
 if ($ApproveStateChanges) { throw '-ApproveStateChanges is only valid with -Mode PolicyCycle.' }
+$comparisonFixture=[pscustomobject]@{ PolicyKeyExists=$true; PolicyValues=@{ A='DWord : 0'; B='Binary : AQI=' }; StateFiles=@{ backup='ABSENT' } }
+$reorderedFixture=[pscustomobject]@{ PolicyKeyExists=$true; PolicyValues=@{ B='Binary : AQI='; A='DWord : 0' }; StateFiles=@{ backup='ABSENT' } }
+$changedFixture=[pscustomobject]@{ PolicyKeyExists=$true; PolicyValues=@{ B='Binary : AQM='; A='DWord : 0' }; StateFiles=@{ backup='ABSENT' } }
+if (-not (Compare-Snapshot $comparisonFixture $reorderedFixture) -or (Compare-Snapshot $comparisonFixture $changedFixture)) {
+    throw 'Read-only snapshot comparison self-check failed.'
+}
+Write-Host 'Snapshot comparison self-check: PASS (order independent; changed binary value detected)'
 Write-Host 'AUTOMATED READ-ONLY HOST VALIDATION (unit tests use disposable local fixtures)'
 $before=Get-Snapshot
 & $shell -NoProfile -ExecutionPolicy RemoteSigned -File $unitTests
