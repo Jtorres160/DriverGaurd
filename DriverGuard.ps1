@@ -96,6 +96,19 @@ function Write-Log([string]$Operation,[string]$Result,[string]$Detail) {
         }
     } catch { Write-Warning "Could not write activity log: $($_.Exception.Message)" }
 }
+function Replace-ExistingFile([string]$Source,[string]$Destination,[string]$ExpectedText) {
+    $previous = Join-Path (Split-Path -Parent $Destination) ([IO.Path]::GetRandomFileName())
+    [IO.File]::Replace($Source,$Destination,$previous)
+    try {
+        if ([IO.File]::ReadAllText($Destination,(New-Object Text.UTF8Encoding($false))) -cne $ExpectedText) {
+            throw 'Replacement content did not match the requested state.'
+        }
+        if (-not [IO.File]::Exists($previous)) { throw 'The previous state copy was not created.' }
+        Assert-SecureStatePath $Destination
+        Assert-SecureStatePath $previous
+    } catch { throw "Atomic replacement verification failed; prior state retained at $previous. $($_.Exception.Message)" }
+    [IO.File]::Delete($previous)
+}
 function Write-Atomic([string]$Path,[string]$Text) {
     Protect-DataDirectory
     if (Test-Path -LiteralPath $Path) { Assert-SecureStatePath $Path }
@@ -106,7 +119,7 @@ function Write-Atomic([string]$Path,[string]$Text) {
         $fileAcl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
         Set-Acl -LiteralPath $temp -AclObject $fileAcl
         if (Test-Path -LiteralPath $Path) {
-            [IO.File]::Replace($temp,$Path,$null)
+            Replace-ExistingFile $temp $Path $Text
         } else { [IO.File]::Move($temp,$Path) }
     } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force } }
 }

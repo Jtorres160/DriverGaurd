@@ -10,6 +10,29 @@ function Check([bool]$Condition,[string]$Name) {
 function Throws([scriptblock]$Block,[string]$Name) {
     try { & $Block; Check $false $Name } catch { Check $true $Name }
 }
+& {
+    # Exercise the real Windows file replacement without requiring admin ACLs on a test fixture.
+    function Assert-SecureStatePath([string]$Path) { if (-not (Test-Path -LiteralPath $Path)) { throw 'Test replacement is missing.' } }
+    $dir=Join-Path $PSScriptRoot ('atomic-fixture-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($dir) | Out-Null
+    try {
+        $dest=Join-Path $dir 'original-state.ini'
+        $next=Join-Path $dir 'next.tmp'
+        [IO.File]::WriteAllText($dest,'Phase=Prepared')
+        [IO.File]::WriteAllText($next,'Phase=Active')
+        Replace-ExistingFile $next $dest 'Phase=Active'
+        Check (([IO.File]::ReadAllText($dest) -ceq 'Phase=Active') -and -not [IO.File]::Exists($next) -and @(Get-ChildItem -LiteralPath $dir -File).Count -eq 1) 'Real existing-file replacement advances Prepared to Active'
+        Throws { Replace-ExistingFile (Join-Path $dir 'missing.tmp') $dest 'Phase=Restored' } 'Failed replacement reports an error'
+        Check ([IO.File]::ReadAllText($dest) -ceq 'Phase=Active') 'Failed replacement retains current recovery state'
+        [IO.File]::WriteAllText($next,'Phase=Restored')
+        Throws { Replace-ExistingFile $next $dest 'unexpected content' } 'Failed readback reports an error'
+        $previous=@(Get-ChildItem -LiteralPath $dir -File | Where-Object { $_.FullName -ne $dest })
+        Check (([IO.File]::ReadAllText($dest) -ceq 'Phase=Restored') -and $previous.Count -eq 1 -and [IO.File]::ReadAllText($previous[0].FullName) -ceq 'Phase=Active') 'Failed readback retains prior recovery data'
+    } finally {
+        foreach ($file in @(Get-ChildItem -LiteralPath $dir -File)) { [IO.File]::Delete($file.FullName) }
+        [IO.Directory]::Delete($dir)
+    }
+}
 function New-Gpu([string]$Vendor,[string]$Id,[string]$Inf='oem1.inf',[string]$Version='1.0') {
     [pscustomobject]@{ Vendor=$Vendor; InstanceId=$Id; Model="$Vendor Graphics"; HardwareIds=@($Id); Provider=$Vendor; Inf=$Inf; InfSource='Fixture'; Version=$Version; Status='OK'; Date='2026-01-01' }
 }

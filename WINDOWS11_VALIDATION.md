@@ -1,5 +1,9 @@
 # Windows 11 validation checklist
 
+## Phase 4A VMware finding — October 16, 2026
+
+The user reported that a Windows 11 Home build 26300 VM with an initially absent target value ran Enable, wrote `REG_DWORD 1`, and then failed to replace the existing `Prepared` recovery file because the `File.Replace` backup path was null. Status showed a valid `Prepared` record and incomplete operation. The code fix was reproduced with disposable Windows PowerShell 5.1 files and passed local regression tests, but **has not been retested in that VM**. Do not run Enable again against `Prepared` plus value `1`; assess the VM's current policy and recovery record separately before any authorized Restore or snapshot rollback. Phase 4A and 4B remain partial.
+
 ## Phase 5C/6C readiness — October 15, 2026
 
 The fresh standard-user pass confirmed one present RTX 4080 SUPER and active `oem23.inf`/`32.0.16.1742` across current Windows device interfaces. These interfaces share underlying PnP/driver metadata; they provide cross-interface consistency, not independent installer history. The five staged Display packages do not establish any additional active GPU. Structured `Get-WindowsDriver -Online` requires elevation; raw PnPUtil inventory is readable but incomplete for structured association. Native Diagnose and the harness appropriately returned PARTIAL (`2`) for that source limit. The readable SetupAPI log has no matching target record, Windows Update history has no GPU item, and two Device Setup events do not establish causation. Provenance remains `UNKNOWN`; there are **zero** real installations with independently known source. See [the validation matrix](docs/VALIDATION_MATRIX.md) for physical coverage and a reproducible labeled-case plan. The Phase 4 live readiness checklist below remains in force; Phase 7 has not begun.

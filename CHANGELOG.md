@@ -1,5 +1,10 @@
 # Changelog
 
+## Phase 4A recovery-file correction — 2026-10-16
+
+- Fixed Windows PowerShell 5.1 atomic replacement of an existing recovery file by providing a real rollback path. The prior `Prepared` state is retained if replacement verification fails.
+- Added real-filesystem replacement and failure regression coverage. The fix passed local tests and still requires a live VMware retest; Phase 4 remains partial.
+
 ## Phase 5B/6B validation and hardening — 2026-10-15
 
 - Restricted SetupAPI correlation to exact device-install sections and active INF, preserved fractional chronology, and refused incidental Windows Update mentions or staged imports as direct installation evidence.

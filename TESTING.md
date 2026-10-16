@@ -1,5 +1,13 @@
 # Testing
 
+## Phase 4A atomic replacement fix — October 16, 2026
+
+A user-reported live VMware run on Windows 11 Home build 26300 began with `ExcludeWUDriversInQualityUpdate` absent. Enable wrote `REG_DWORD 1`, then failed while advancing the recovery record from `Prepared` to `Active` with `[IO.File]::Replace` reporting “The path is not of a legal form.” Status subsequently reported a valid `Prepared` backup and an incomplete operation. This is a reported live observation, not a retest of the fix. The VM state has not been automatically repaired.
+
+The failure was reproduced locally with disposable files under **Windows PowerShell 5.1**: `[IO.File]::Replace(source,destination,$null)` threw the same error and left the destination unchanged. Supplying a real rollback path in the same directory succeeded, advanced the destination to `Active`, and retained its prior `Prepared` content in the rollback file. `Write-Atomic` now uses that path, verifies destination content and secure state before deleting the temporary rollback copy, and retains the old copy if post-replacement verification fails. The existing `Prepared` recovery logic is unchanged.
+
+The full suite passed **102/102**, exit `0`. Five new assertions exercise real filesystem replacement of an existing file, a missing-source failure that preserves the destination, and a post-replacement readback failure that retains the prior content. The ACL check is stubbed only for this disposable standard-user fixture; no privileged state path was changed. PowerShell 5.1 parser checks found zero errors in `DriverGuard.ps1` and both test scripts. The read-only host harness passed its snapshot self-check and embedded suite, then returned `2` because structured driver-store inventory still requires elevation; monitored policy values and DriverGuard state-file hashes were unchanged. The corrected Enable/Restore flow still requires a separately authorized VMware retest before Phase 4A can be closed.
+
 ## Phase 5C/6C independent read-only assessment — October 15, 2026
 
 Fresh runs: `tests/DriverGuard.Tests.ps1` passed 97/97, exit `0`; `tests/Windows11.Validation.ps1 -Mode ReadOnly` passed its snapshot self-check and embedded 97/97 mocked assertions, while native Diagnose and the harness exited `2` (PARTIAL). PowerShell 5.1 parsed `DriverGuard.ps1` and both test scripts with zero errors. The harness reported unchanged monitored policy values and DriverGuard state-file hashes. No elevation or Windows configuration, driver, or reboot action occurred.
