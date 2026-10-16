@@ -8,7 +8,7 @@ Keep `DriverGuard.bat` and `DriverGuard.ps1` in the same folder. Double-click th
 
 The script is intended for Windows PowerShell 5.1 on Windows 10 version 1607 or later and Windows 11. Live compatibility has **not** been established across editions and builds. Microsoft's Update CSP edition table lists Pro, Enterprise, Education, and IoT Enterprise; Home effectiveness is uncertain. Managed systems may enforce a conflicting Group Policy, MDM, or WSUS policy.
 
-For a strictly read-only Windows diagnostics pass, run `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\DriverGuard.ps1 -Action Diagnose` from this directory. This CLI action does not write DriverGuard logs or state. It reports policy and backup state, physical GPU and active INF, driver-store inventory, and provenance evidence. Run it again in an administrator session if structured driver-store inventory requires elevation. See [Windows 11 validation](WINDOWS11_VALIDATION.md) for the safe and potentially disruptive test steps.
+For a strictly read-only Windows diagnostics pass, run `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\DriverGuard.ps1 -Action Diagnose` from this directory. This CLI action does not write DriverGuard logs or state. It reports policy and backup state, physical GPU and active INF, driver-store inventory, and provenance evidence. Its exit code is `0` for complete, `2` for partial source availability, or `1` for a critical read or recovery-state failure. Run it again in an administrator session if structured driver-store inventory requires elevation. See [Windows 11 validation](WINDOWS11_VALIDATION.md) for the safe and potentially disruptive test steps.
 
 ## Menu
 

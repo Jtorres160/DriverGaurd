@@ -413,17 +413,19 @@ function Show-GpuInspection {
     Write-Host 'Multiple staged packages do not establish which one installed a device. Active INF is shown per GPU.'
 }
 function Show-ReadOnlyDiagnostics {
+    $failures=New-Object Collections.Generic.List[string]
+    $limitations=New-Object Collections.Generic.List[string]
     Write-Host 'DriverGuard read-only diagnostics (no log or state writes)'
     Write-Host "Captured UTC: $((Get-Date).ToUniversalTime().ToString('o'))"
-    try { Write-Host "Privileges: $(if (Test-Admin) {'Administrator'} else {'Standard user'})" } catch { Write-Host "Privileges: UNAVAILABLE - $($_.Exception.Message)" }
+    try { Write-Host "Privileges: $(if (Test-Admin) {'Administrator'} else {'Standard user'})" } catch { Write-Host "Privileges: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add('Privilege detection unavailable') }
     try { $os=Get-OS; Write-Host "Windows: $($os.Name) | version $($os.Version) | build $($os.Build)" }
-    catch { Write-Host "Windows: UNAVAILABLE - $($_.Exception.Message)" }
+    catch { Write-Host "Windows: UNAVAILABLE - $($_.Exception.Message)"; $failures.Add('Windows identity unavailable') }
     $policy=$null
     try {
         $policy=Read-Policy
         Write-Host "Policy: $(Get-PolicyLabel $policy) | key=$($policy.KeyExists) | value=$($policy.ValueExists) | type=$($policy.Type) | data=$($policy.Value)"
         Write-Host 'Policy enforcement: not established by registry inspection.'
-    } catch { Write-Host "Policy: UNAVAILABLE - $($_.Exception.Message)" }
+    } catch { Write-Host "Policy: UNAVAILABLE - $($_.Exception.Message)"; $failures.Add('Policy read unavailable') }
     try {
         $backup=Read-Backup
         if ($backup) {
@@ -435,26 +437,27 @@ function Show-ReadOnlyDiagnostics {
             }
             Write-Host "Backup: $($backup.Phase) | original key=$($backup.OriginalKeyExists) value=$($backup.OriginalValueExists) type=$($backup.OriginalType) data=$($backup.OriginalValue) | $relation"
         } else { Write-Host 'Backup: MISSING' }
-    } catch { Write-Host "Backup: UNAVAILABLE OR INVALID - $($_.Exception.Message)" }
+    } catch { Write-Host "Backup: UNAVAILABLE OR INVALID - $($_.Exception.Message)"; $failures.Add('Recovery backup unreadable or invalid') }
     $journal=$null
     try { $journal=Read-Journal; Write-Host "Install journal: $(if ($journal) {$journal.State} else {'MISSING'})" }
-    catch { Write-Host "Install journal: UNAVAILABLE OR INVALID - $($_.Exception.Message)" }
+    catch { Write-Host "Install journal: UNAVAILABLE OR INVALID - $($_.Exception.Message)"; $failures.Add('Install journal unreadable or invalid') }
     $gpus=@(); $packages=@(); $updates=@(); $updatesAvailable=$false; $packagesAvailable=$false
     try { $gpus=@(Get-Gpus); Write-Host "GPU inventory: $($gpus.Count) supported PCI Display device(s)" }
-    catch { Write-Host "GPU inventory: UNAVAILABLE - $($_.Exception.Message)" }
+    catch { Write-Host "GPU inventory: UNAVAILABLE - $($_.Exception.Message)"; $failures.Add('GPU inventory unavailable') }
     try { $packages=@(Get-DriverPackages); $packagesAvailable=$true; Write-Host "Driver store: $($packages.Count) third-party Display package(s)" }
     catch {
         Write-Host "Driver store structured inventory: UNAVAILABLE - $($_.Exception.Message)"
+        $limitations.Add('Structured driver store inventory unavailable')
         try {
             $rawPackages=@(& pnputil.exe /enum-drivers /class Display 2>&1)
             if ($LASTEXITCODE -ne 0) { throw "PnPUtil exited with code $LASTEXITCODE" }
             Write-Host 'Driver store fallback: raw PnPUtil Display inventory (compare Published Name to active INF; association unverified)'
             foreach ($line in ($rawPackages | Select-Object -First 120)) { Write-Host "  $line" }
             if ($rawPackages.Count -gt 120) { Write-Host '  [output truncated at 120 lines]' }
-        } catch { Write-Host "Driver store fallback: UNAVAILABLE - $($_.Exception.Message)" }
+        } catch { Write-Host "Driver store fallback: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add('Driver store fallback unavailable') }
     }
     try { $updates=@(Get-UpdateHistory -Strict); $updatesAvailable=$true; Write-Host "Windows Update history: $($updates.Count) successful item(s) in latest 1000 records" }
-    catch { Write-Host "Windows Update history: UNAVAILABLE - $($_.Exception.Message)" }
+    catch { Write-Host "Windows Update history: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add('Windows Update history unavailable') }
     foreach ($gpu in $gpus) {
         Write-Host "GPU: $($gpu.Vendor) | $($gpu.Model) | $($gpu.InstanceId) | status=$($gpu.Status)"
         Write-Host "  Active driver: INF=$($gpu.Inf) provider=$($gpu.Provider) version=$($gpu.Version) date=$($gpu.Date)"
@@ -464,15 +467,21 @@ function Show-ReadOnlyDiagnostics {
         }
         $setup=@(); $events=@(); $setupAvailable=$false
         try { $setup=@(Get-SetupEvidence $gpu.InstanceId $gpu.Inf -Strict); $setupAvailable=$true; Write-Host "  SetupAPI: $($setup.Count) matching section(s)" }
-        catch { Write-Host "  SetupAPI: UNAVAILABLE - $($_.Exception.Message)" }
+        catch { Write-Host "  SetupAPI: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add("SetupAPI evidence unavailable for $($gpu.InstanceId)") }
         try { $events=@(Get-EventEvidence $gpu.InstanceId -Strict); Write-Host "  Device Setup events: $($events.Count) matching event(s)" }
-        catch { Write-Host "  Device Setup events: UNAVAILABLE - $($_.Exception.Message)" }
+        catch { Write-Host "  Device Setup events: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add("Device Setup events unavailable for $($gpu.InstanceId)") }
         if ($updatesAvailable -and $setupAvailable) {
             $origin=Classify-Origin $gpu $updates $setup $events $journal
             Write-Host "  Provenance: $($origin.Classification)"
             foreach ($item in $origin.Evidence) { Write-Host "    $item" }
         } else { Write-Host '  Provenance: INDETERMINATE (required evidence source unavailable)' }
     }
+    foreach ($reason in $failures) { Write-Host "Failed source: $reason" }
+    foreach ($reason in $limitations) { Write-Host "Partial source: $reason" }
+    if ($failures.Count -gt 0) { Write-Host 'Diagnose result: FAILED (exit 1)'; return 1 }
+    if ($limitations.Count -gt 0) { Write-Host 'Diagnose result: PARTIAL (exit 2)'; return 2 }
+    Write-Host 'Diagnose result: COMPLETE (exit 0)'
+    return 0
 }
 function Test-PendingRestart {
     $paths = @(
@@ -741,14 +750,15 @@ if ($env:DRIVERGUARD_TEST_MODE -ne '1') {
             }
             'Help' { Show-Help }
             'Inspect' { Show-GpuInspection }
-            'Diagnose' { Show-ReadOnlyDiagnostics }
+            'Diagnose' { $diagnoseCode=Show-ReadOnlyDiagnostics; exit $diagnoseCode }
             'Install' { Install-GpuDriver }
             'Verify' { Verify-GpuDriver }
             'Cleanup' { Cleanup-GpuDriver }
         }
     } catch {
         Write-Host "DriverGuard error: $($_.Exception.Message)" -ForegroundColor Red
-        if ($Action -ne 'Diagnose') { Write-Log $Action 'FAILED' $_.Exception.Message }
+        if ($Action -eq 'Diagnose') { Write-Host 'Diagnose result: FAILED (exit 1)' }
+        else { Write-Log $Action 'FAILED' $_.Exception.Message }
         exit 1
     }
 }

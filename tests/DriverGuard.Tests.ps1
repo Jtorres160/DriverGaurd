@@ -209,7 +209,15 @@ function Get-EventEvidence { param([string]$InstanceId,[switch]$Strict) return @
 $beforeLogs=$script:logEntries.Count
 $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
 Check ($report -match 'Policy:' -and $report -match 'GPU:' -and $report -match 'Driver store association:' -and $report -match 'Provenance:') 'Read-only diagnostics report required sources'
+Check ($report -match 'Diagnose result: COMPLETE \(exit 0\)' -and $report -match '(?m)^0\s*$') 'Complete diagnostics return exit code zero'
 Check ($script:logEntries.Count -eq $beforeLogs) 'Read-only diagnostics writes no activity log'
+function Get-DriverPackages { throw 'Elevated inventory required' }
+function pnputil.exe { $global:LASTEXITCODE=0; return 'Published Name: oem1.inf' }
+$report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'Diagnose result: PARTIAL \(exit 2\)' -and $report -match 'Structured driver store inventory unavailable') 'Partial diagnostics identify limited source'
+function Read-Policy { throw 'Registry read denied' }
+$report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'Diagnose result: FAILED \(exit 1\)' -and $report -match 'Policy read unavailable') 'Failed diagnostics identify critical source'
 
 Remove-Item -LiteralPath $tmp -Recurse -Force
 Write-Host "RESULT: $script:passed passed; $script:failed failed"
