@@ -1,5 +1,9 @@
 # Windows 11 validation checklist
 
+## Phase 5/6 read-only observation — October 15, 2026
+
+Standard-user host inspection matched one NVIDIA GeForce RTX 4080 SUPER across PnP, signed-driver CIM, video-controller CIM, PnP device properties, and PnPUtil device enumeration. Active INF `oem23.inf` and version `32.0.16.1742` matched independent device-level sources. PnPUtil listed five staged Display packages; these are inventory, not active bindings. Windows Update history and Device Setup events were readable, but no SetupAPI section matched this device and active INF, so provenance remained `UNKNOWN`. No independent ground truth for the installer was available. The 86-check mocked suite passed; read-only harness exited `2` because structured driver-store inventory required elevation. Policy and DriverGuard state-file snapshots were unchanged. AMD, Intel, multi-GPU, disabled, hidden, and non-present live cases remain pending. Phase 4 live policy and recovery cases remain gated by the isolated rollback environment and authorization described below.
+
 ## Live Phase 4 readiness — October 15, 2026 follow-up
 
 **Disposition: BLOCKED for live tests; Phase 4A/4B remain PARTIAL.** Read-only inspection found a standard-user session on a Gigabyte X870 GAMING WIFI6 host, `HypervisorPresent=False`, Windows 11 IoT Enterprise LTSC build 26100, and no WindowsUpdate policy key. Computer-scope `gpresult /r` returned access denied (exit `1`), so Group Policy ownership was not established. Enrollment subkeys were present, but an active MDM configuration or conflict was not established. No isolated VM or equivalent recovery boundary, usable snapshot identifier, or tested rollback procedure was provided. The application's own registry backup is insufficient as a machine rollback plan.

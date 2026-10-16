@@ -38,7 +38,9 @@ System activity is logged to `%ProgramData%\DriverGuard\DriverGuard.log`; standa
 
 ### GPU provenance
 
-DriverGuard correlates per-device active INF information with available Windows Update history, SetupAPI.dev.log sections, and Device Setup Manager events. A confirmed Windows Update classification requires a matching update title, a matching device/INF SetupAPI section with an explicit Windows Update marker, and timestamps within 48 hours. Likely requires matching title, device/INF section, and timing without an explicit marker. A DriverGuard-run manufacturer installation is supported by evidence only after post-install verification. Otherwise origin is **Unknown**. Provider name alone never decides provenance. Missing or rotated history, localized titles, missing logs, and ambiguous package matches commonly leave origin unknown.
+DriverGuard uses the device instance ID to join Display devices to signed-driver CIM records and reads the device's active INF property when available. Conflicting INF values are labeled unverified. Hardware IDs that cannot be read remain unavailable. Staged driver-store packages are listed separately; matching vendor or version does not make one active.
+
+Provenance classifications are `WINDOWS_UPDATE_CONFIRMED`, `PROBABLE_WINDOWS_UPDATE`, `PROBABLE_MANUFACTURER`, `CONFLICTING_EVIDENCE`, and `UNKNOWN`. Confirmation requires a SetupAPI section whose header names the device, whose contents name its active INF and explicitly indicate Windows Update, plus a matching update-history title within 48 hours. A verified DriverGuard installer journal supports only probable manufacturer origin because the installer's causation cannot be independently proven. The latest matching SetupAPI section takes precedence over older sections. Provider name, a nearby timestamp, and a staged package alone never establish origin. Missing or rotated history, localized titles, missing logs, and ambiguous evidence commonly leave origin unknown.
 
 ### Installation limits
 

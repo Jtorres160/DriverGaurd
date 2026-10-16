@@ -11,7 +11,7 @@ function Throws([scriptblock]$Block,[string]$Name) {
     try { & $Block; Check $false $Name } catch { Check $true $Name }
 }
 function New-Gpu([string]$Vendor,[string]$Id,[string]$Inf='oem1.inf',[string]$Version='1.0') {
-    [pscustomobject]@{ Vendor=$Vendor; InstanceId=$Id; Model="$Vendor Graphics"; HardwareIds=@($Id); Provider=$Vendor; Inf=$Inf; Version=$Version; Status='OK'; Date='2026-01-01' }
+    [pscustomobject]@{ Vendor=$Vendor; InstanceId=$Id; Model="$Vendor Graphics"; HardwareIds=@($Id); Provider=$Vendor; Inf=$Inf; InfSource='Fixture'; Version=$Version; Status='OK'; Date='2026-01-01' }
 }
 function New-Journal([string]$State='InstallerExited') {
     [pscustomobject]@{ Schema=1; State=$State; InstanceId='PCI\VEN_10DE&DEV_1234\A'; Vendor='NVIDIA'; Model='NVIDIA Graphics'; OldInf='oem1.inf'; OldVersion='1.0'; OldProvider='NVIDIA'; ExpectedVersion='2.0'; NewInf=''; NewVersion=''; VerifiedUtc='' }
@@ -32,25 +32,49 @@ $script:testSigned = @(
     [pscustomobject]@{ ClassGuid=$script:DisplayGuid; DeviceID='PCI\VEN_10DE&DEV_5678\N'; DriverProviderName='NVIDIA'; DriverVersion='32.0'; DriverDate='2026-02-01'; InfName='oem3.inf' }
 )
 function Get-CimInstance([string]$ClassName) { if ($ClassName -eq 'Win32_PnPEntity') { return $script:testEntities }; if ($ClassName -eq 'Win32_PnPSignedDriver') { return $script:testSigned } }
-function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) [pscustomobject]@{ Data=@($InstanceId) } }
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) if ($KeyName -eq 'DEVPKEY_Device_DriverInfPath') { return [pscustomobject]@{ Data=$(if ($InstanceId -match '8086') {'oem2.inf'} else {'oem3.inf'}) } }; throw 'Hardware ID property unavailable' }
 $hybrid=@(Get-Gpus)
 Check ($hybrid.Count -eq 2 -and $hybrid[0].Vendor -eq 'Intel' -and $hybrid[1].Vendor -eq 'NVIDIA') 'Hybrid graphics detection'
 Check ($hybrid[0].Inf -eq 'oem2.inf' -and $hybrid[1].Inf -eq 'oem3.inf') 'Per-device active INF mapping'
+Check (@($hybrid[0].HardwareIds).Count -eq 0) 'Unverified hardware IDs are not fabricated from instance IDs'
+$script:testEntities += $script:testEntities[0]
+Check (@(Get-Gpus).Count -eq 2) 'Duplicate entity rows do not duplicate a GPU'
+$script:testEntities = @($script:testEntities | Select-Object -First 3)
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) if ($KeyName -eq 'DEVPKEY_Device_DriverInfPath') { [pscustomobject]@{ Data='oem99.inf' } } else { throw 'Unavailable' } }
+Check (-not (@(Get-Gpus | Where-Object { $_.Vendor -eq 'NVIDIA' })[0].Inf)) 'Conflicting device INF sources remain unverified'
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) throw 'Unavailable' }
+Check (@(Get-Gpus | Where-Object { $_.Vendor -eq 'NVIDIA' })[0].Inf -eq 'oem3.inf') 'Signed-driver binding remains available when PnP property is unavailable'
 
 $gpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A'
 $unknown=Classify-Origin $gpu @() @() @() $null
-Check ($unknown.Classification -eq 'Unknown origin') 'Missing Windows Update history yields unknown'
+Check ($unknown.Classification -eq 'UNKNOWN') 'Missing Windows Update history yields unknown'
 $providerOnly=Classify-Origin $gpu @([pscustomobject]@{ Title='NVIDIA Display Driver'; Date=(Get-Date) }) @() @() $null
-Check ($providerOnly.Classification -eq 'Unknown origin') 'Provider/title alone cannot establish provenance'
-$setup=@([pscustomobject]@{ WindowsUpdateMarker=$false; Header='Device install'; Started=(Get-Date) })
+Check ($providerOnly.Classification -eq 'UNKNOWN') 'Provider/title alone cannot establish provenance'
+$setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='Device install'; Started=(Get-Date) })
 $history=@([pscustomobject]@{ Title='NVIDIA Graphics driver'; Date=(Get-Date) })
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Likely Windows Update installation') 'Correlated WU and SetupAPI evidence'
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Correlated WU and SetupAPI evidence remains probable'
 $setup[0].WindowsUpdateMarker=$true
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Confirmed Windows Update installation') 'Explicit WU SetupAPI evidence'
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'WINDOWS_UPDATE_CONFIRMED') 'Explicit WU SetupAPI evidence'
 $setup[0].Started=(Get-Date).AddDays(-10)
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Unknown origin') 'Unrelated timestamps remain unknown'
-$setup=@([pscustomobject]@{ WindowsUpdateMarker=$true; Header='old install'; Started=(Get-Date).AddDays(-10) },[pscustomobject]@{ WindowsUpdateMarker=$false; Header='new install'; Started=(Get-Date) })
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Likely Windows Update installation') 'Unrelated WU marker cannot confirm current install'
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Exact SetupAPI WU marker without nearby history remains probable'
+$setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$true; Header='old install'; Started=(Get-Date).AddDays(-10) },[pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='new install'; Started=(Get-Date) })
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Old WU marker cannot confirm newer installation'
+$setup=@([pscustomobject]@{ InstanceId='PCI\VEN_1002&DEV_1234\B'; Inf='oem8.inf'; WindowsUpdateMarker=$true; Header='other GPU'; Started=(Get-Date) })
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Other GPU SetupAPI evidence cannot establish origin'
+Check ((Classify-Origin (New-Gpu 'NVIDIA' $gpu.InstanceId '') $history $setup @() $null).Classification -eq 'UNKNOWN') 'Missing active INF blocks provenance inference'
+$setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$true; Header='matching install'; Started=(Get-Date) })
+$conflictJournal=New-Journal 'Verified'; $conflictJournal.NewInf=$gpu.Inf; $conflictJournal.NewVersion=$gpu.Version
+Check ((Classify-Origin $gpu $history $setup @() $conflictJournal).Classification -eq 'CONFLICTING_EVIDENCE') 'Conflicting journal and SetupAPI evidence is explicit'
+Check ((Classify-Origin $gpu @() @() @() $conflictJournal).Classification -eq 'PROBABLE_MANUFACTURER') 'Verified installer journal remains probable without independent causation'
+foreach ($vendorGpu in @((New-Gpu 'AMD' 'PCI\VEN_1002&DEV_1234\A' 'oem4.inf'),(New-Gpu 'Intel' 'PCI\VEN_8086&DEV_1234\A' 'oem5.inf'))) {
+    $vendorHistory=@([pscustomobject]@{ Title="$($vendorGpu.Model) display driver"; Date=(Get-Date) })
+    $vendorSetup=@([pscustomobject]@{ InstanceId=$vendorGpu.InstanceId; Inf=$vendorGpu.Inf; WindowsUpdateMarker=$true; Header='device install'; Started=(Get-Date) })
+    Check ((Classify-Origin $vendorGpu $vendorHistory $vendorSetup @() $null).Classification -eq 'WINDOWS_UPDATE_CONFIRMED') "$($vendorGpu.Vendor) synthetic Windows Update correlation"
+}
+$stagedGpu=New-Gpu 'NVIDIA' $gpu.InstanceId 'oem77.inf'
+Check ((Classify-Origin $stagedGpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Matching staged INF cannot establish active-driver provenance'
+$wrongVersionJournal=New-Journal 'Verified'; $wrongVersionJournal.NewInf=$gpu.Inf; $wrongVersionJournal.NewVersion='older'
+Check ((Classify-Origin $gpu @() @() @() $wrongVersionJournal).Classification -eq 'UNKNOWN') 'Verified journal for another version cannot establish current origin'
 
 $tmp=Join-Path $PSScriptRoot 'fixture-package'
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null

@@ -1,5 +1,11 @@
 # Changelog
 
+## Phase 5/6 read-only development — 2026-10-15
+
+- Preserved unknown GPU hardware IDs and conflicting active INF evidence instead of guessing; deduplicated device identities.
+- Restricted provenance correlation to the latest exact device/active-INF SetupAPI section, with explicit confirmed, probable, conflict, and unknown outcomes.
+- Passed 86 mocked checks and observed one NVIDIA device through independent read-only Windows sources. Native provenance remained unknown; structured driver-store inventory required elevation. Phase 4 live validation remains pending.
+
 ## Phase 4 safety validation follow-up — 2026-10-15
 
 - Refused policy writes when the target changes during confirmation or after backup preparation; added mocked recovery coverage for state-file write failures.

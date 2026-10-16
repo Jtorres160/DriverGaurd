@@ -288,20 +288,33 @@ function Get-GpuVendor([string]$InstanceId) {
     return $null
 }
 function Get-Gpus {
-    $signed = @(Get-CimInstance Win32_PnPSignedDriver | Where-Object { $_.ClassGuid -eq $script:DisplayGuid })
-    $entities = @(Get-CimInstance Win32_PnPEntity | Where-Object { $_.PNPClass -eq 'Display' -and $_.PNPDeviceID -match '^PCI\\VEN_(10DE|1002|8086)&' })
+    $signed = @(Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop | Where-Object { $_.ClassGuid -eq $script:DisplayGuid })
+    $entities = @(Get-CimInstance Win32_PnPEntity -ErrorAction Stop | Where-Object { $_.PNPClass -eq 'Display' -and $_.PNPDeviceID -match '^PCI\\VEN_(10DE|1002|8086)&' })
+    $seen = @{}
     foreach ($entity in $entities) {
         $id = [string]$entity.PNPDeviceID
-        $driver = @($signed | Where-Object { $_.DeviceID -eq $id }) | Select-Object -First 1
+        if ($seen.ContainsKey($id)) { continue }
+        $seen[$id] = $true
+        $matches = @($signed | Where-Object { $_.DeviceID -eq $id })
+        $driver = $null
+        if ($matches.Count -eq 1) { $driver = $matches[0] }
         $hardwareIds = @()
-        try { $hardwareIds = @((Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction Stop).Data) } catch { $hardwareIds = @($id -replace '\\.*$','') }
+        try { $hardwareIds = @((Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_HardwareIds' -ErrorAction Stop).Data | Where-Object { $_ -match '^PCI\\VEN_[0-9A-F]{4}&DEV_[0-9A-F]{4}' }) } catch { }
+        $inf = if ($driver) { [string]$driver.InfName } else { '' }
+        $infSource = if ($inf) { 'Win32_PnPSignedDriver' } else { 'Unavailable or ambiguous' }
+        try {
+            $pnpInf = [string](Get-PnpDeviceProperty -InstanceId $id -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction Stop).Data
+            if ($pnpInf) {
+                if ($inf -and $inf -ine $pnpInf) { $inf=''; $infSource='Conflicting device properties' }
+                else { $inf=$pnpInf; $infSource=$(if ($driver) {'PnP device property and signed driver'} else {'PnP device property only'}) }
+            }
+        } catch { }
         [pscustomobject]@{
             InstanceId=$id; Vendor=(Get-GpuVendor $id); Model=[string]$entity.Name
             HardwareIds=$hardwareIds; Provider=$(if ($driver) {[string]$driver.DriverProviderName} else {''})
             Version=$(if ($driver) {[string]$driver.DriverVersion} else {''})
             Date=$(if ($driver) {[string]$driver.DriverDate} else {''})
-            Inf=$(if ($driver) {[string]$driver.InfName} else {''})
-            Status=[string]$entity.Status
+            Inf=$inf; InfSource=$infSource; Status=[string]$entity.Status
         }
     }
 }
@@ -337,12 +350,12 @@ function Get-SetupEvidence([string]$InstanceId,[string]$Inf,[switch]$Strict) {
             if ($inSection) { $section.Add($line) }
             if ($line -match '^<<<  Section end') {
                 $joined = $section -join "`n"
-                if ($joined.IndexOf($InstanceId,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $joined.IndexOf($Inf,[StringComparison]::OrdinalIgnoreCase) -ge 0) {
-                    $wu = $joined -match '(?im)Windows Update|UpdateAgent|WUDriver'
+                if ($section.Count -gt 0 -and $section[0].IndexOf($InstanceId,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $joined -match "(?i)(?<![a-z0-9_.])$([regex]::Escape($Inf))(?![a-z0-9_.])") {
+                    $wu = $joined -match '(?im)^.*(?:Windows Update|UpdateAgent|WUDriver).*$'
                     $dateMatch = [regex]::Match($joined,'(?im)^>>>  Section start (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})')
                     $started = [datetime]::MinValue
                     if ($dateMatch.Success) { [datetime]::TryParseExact($dateMatch.Groups[1].Value,'yyyy/MM/dd HH:mm:ss',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$started) | Out-Null }
-                    $hits.Add([pscustomobject]@{ WindowsUpdateMarker=$wu; Header=$section[0]; End=$line; Started=$started })
+                    $hits.Add([pscustomobject]@{ InstanceId=$InstanceId; Inf=$Inf; WindowsUpdateMarker=$wu; Header=$section[0]; End=$line; Started=$started })
                 }
                 $inSection=$false
             }
@@ -359,31 +372,36 @@ function Get-EventEvidence([string]$InstanceId,[switch]$Strict) {
 }
 function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
     $evidence = New-Object Collections.Generic.List[string]
+    if (-not $gpu.InstanceId -or $gpu.Inf -notmatch '^oem\d+\.inf$') {
+        return [pscustomobject]@{ Classification='UNKNOWN'; Evidence=@('Active device-to-INF identity is unavailable.') }
+    }
+    $bound = @($setup | Where-Object { $_.InstanceId -ieq $gpu.InstanceId -and $_.Inf -ieq $gpu.Inf -and $_.Started -is [datetime] -and $_.Started -ne [datetime]::MinValue } | Sort-Object Started)
+    $latest = if ($bound.Count -gt 0) { $bound[-1] } else { $null }
     $matchingTitles = @($updates | Where-Object {
-        $_.Title -match '(?i)driver|display|graphics' -and
-        $gpu.Model -and $_.Title.IndexOf($gpu.Model,[StringComparison]::OrdinalIgnoreCase) -ge 0
+        $_.Title -match '(?i)driver|display|graphics' -and $gpu.Model -and
+        $_.Title.IndexOf($gpu.Model,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.Date -is [datetime]
     })
-    $wu = @($matchingTitles | Where-Object {
-        $updateDate = [datetime]$_.Date
-        @($setup | Where-Object { $_.Started -ne [datetime]::MinValue -and [Math]::Abs(($_.Started - $updateDate).TotalHours) -le 48 }).Count -gt 0
-    })
-    $correlated = @($setup | Where-Object {
-        $started = $_.Started
-        $started -ne [datetime]::MinValue -and @($matchingTitles | Where-Object { [Math]::Abs(($started - [datetime]$_.Date).TotalHours) -le 48 }).Count -gt 0
-    })
-    if ($wu.Count -gt 0) { $evidence.Add("Windows Update history: $($wu[0].Title) [$($wu[0].Date)]") }
-    if (@($setup).Count -gt 0) { $evidence.Add("SetupAPI section: $($setup[-1].Header)") }
+    $wu = @()
+    if ($latest) {
+        $wu = @($matchingTitles | Where-Object { [Math]::Abs(($latest.Started - $_.Date).TotalHours) -le 48 })
+        $evidence.Add("Matching device and active INF in SetupAPI: $($latest.Header) [$($latest.Started)]")
+    }
+    if ($wu.Count -gt 0) { $evidence.Add("Nearby Windows Update history title: $($wu[0].Title) [$($wu[0].Date)]") }
     if (@($events).Count -gt 0) { $evidence.Add("Device Setup event: $($events[0].Id) [$($events[0].TimeCreated)]") }
-    if ($journal -and $journal.State -eq 'Verified' -and $journal.InstanceId -eq $gpu.InstanceId -and $journal.NewInf -eq $gpu.Inf -and $journal.NewVersion -eq $gpu.Version) {
-        return [pscustomobject]@{ Classification='Manufacturer installation supported by evidence'; Evidence=@('DriverGuard verified signed manufacturer installer and running replacement driver') }
+    $journalMatch = $journal -and $journal.State -eq 'Verified' -and $journal.InstanceId -ieq $gpu.InstanceId -and $journal.NewInf -ieq $gpu.Inf -and $journal.NewVersion -eq $gpu.Version
+    if ($journalMatch) { $evidence.Add('DriverGuard journal records a verified manufacturer installer and running driver; installer causation is unverified.') }
+    if ($latest -and $latest.WindowsUpdateMarker -and $journalMatch) {
+        return [pscustomobject]@{ Classification='CONFLICTING_EVIDENCE'; Evidence=$evidence.ToArray() }
     }
-    if (@($correlated | Where-Object WindowsUpdateMarker).Count -gt 0 -and $wu.Count -gt 0) {
-        return [pscustomobject]@{ Classification='Confirmed Windows Update installation'; Evidence=$evidence.ToArray() }
+    if ($latest -and $latest.WindowsUpdateMarker -and $wu.Count -gt 0) {
+        return [pscustomobject]@{ Classification='WINDOWS_UPDATE_CONFIRMED'; Evidence=$evidence.ToArray() }
     }
-    if ($wu.Count -gt 0 -and $correlated.Count -gt 0) {
-        return [pscustomobject]@{ Classification='Likely Windows Update installation'; Evidence=$evidence.ToArray() }
+    if ($latest -and $latest.WindowsUpdateMarker) {
+        return [pscustomobject]@{ Classification='PROBABLE_WINDOWS_UPDATE'; Evidence=$evidence.ToArray() }
     }
-    return [pscustomobject]@{ Classification='Unknown origin'; Evidence=$evidence.ToArray() }
+    if ($journalMatch) { return [pscustomobject]@{ Classification='PROBABLE_MANUFACTURER'; Evidence=$evidence.ToArray() } }
+    if ($wu.Count -gt 0) { return [pscustomobject]@{ Classification='PROBABLE_WINDOWS_UPDATE'; Evidence=$evidence.ToArray() } }
+    return [pscustomobject]@{ Classification='UNKNOWN'; Evidence=$evidence.ToArray() }
 }
 function Read-Journal {
     if (-not (Test-Path -LiteralPath $script:JournalPath)) { return $null }
@@ -407,17 +425,17 @@ function Show-GpuInspection {
         $origin = Classify-Origin $gpu $updates $setup $events $journal
         Write-Host "`n$($gpu.Vendor) — $($gpu.Model)"
         Write-Host "  Instance ID : $($gpu.InstanceId)"
-        Write-Host "  Hardware ID : $($gpu.HardwareIds -join ', ')"
-        Write-Host "  Provider    : $($gpu.Provider)"
-        Write-Host "  Version/date: $($gpu.Version) / $($gpu.Date)"
-        Write-Host "  Active INF  : $($gpu.Inf)"
+        Write-Host "  Hardware ID : $(if ($gpu.HardwareIds.Count) {$gpu.HardwareIds -join ', '} else {'UNAVAILABLE'})"
+        Write-Host "  Provider    : $(if ($gpu.Provider) {$gpu.Provider} else {'UNKNOWN'})"
+        Write-Host "  Version/date: $(if ($gpu.Version) {$gpu.Version} else {'UNKNOWN'}) / $(if ($gpu.Date) {$gpu.Date} else {'UNKNOWN'})"
+        Write-Host "  Active INF  : $(if ($gpu.Inf) {$gpu.Inf} else {'UNVERIFIED'}) ($($gpu.InfSource))"
         Write-Host "  Device state: $($gpu.Status)"
         Write-Host "  Origin      : $($origin.Classification)"
         foreach ($item in $origin.Evidence) { Write-Host "    Evidence: $item" }
         Write-Log 'GPU inspection' 'OBSERVED' "Instance=$($gpu.InstanceId); INF=$($gpu.Inf); version=$($gpu.Version); origin=$($origin.Classification)"
     }
     Write-Host "`nStaged third-party Display packages:"
-    if ($packages.Count -eq 0) { Write-Host '  None found or inventory unavailable.' }
+    if ($packages.Count -eq 0) { Write-Host '  No packages returned, or inventory unavailable.' }
     foreach ($package in $packages) { Write-Host "  $($package.Inf) | $($package.Provider) | $($package.Version) | $($package.OriginalInf)" }
     Write-Host 'Multiple staged packages do not establish which one installed a device. Active INF is shown per GPU.'
 }
@@ -469,7 +487,7 @@ function Show-ReadOnlyDiagnostics {
     catch { Write-Host "Windows Update history: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add('Windows Update history unavailable') }
     foreach ($gpu in $gpus) {
         Write-Host "GPU: $($gpu.Vendor) | $($gpu.Model) | $($gpu.InstanceId) | status=$($gpu.Status)"
-        Write-Host "  Active driver: INF=$($gpu.Inf) provider=$($gpu.Provider) version=$($gpu.Version) date=$($gpu.Date)"
+        Write-Host "  Active driver: INF=$(if ($gpu.Inf) {$gpu.Inf} else {'UNVERIFIED'}) ($($gpu.InfSource)) provider=$(if ($gpu.Provider) {$gpu.Provider} else {'UNKNOWN'}) version=$(if ($gpu.Version) {$gpu.Version} else {'UNKNOWN'}) date=$(if ($gpu.Date) {$gpu.Date} else {'UNKNOWN'})"
         if ($packagesAvailable) {
             $associated=@($packages | Where-Object { $_.Inf -eq $gpu.Inf })
             Write-Host "  Driver store association: $(if ($associated.Count -eq 1) {"UNIQUE | original=$($associated[0].OriginalInf)"} elseif ($associated.Count -eq 0) {'NO MATCH'} else {'AMBIGUOUS'})"
