@@ -1,5 +1,10 @@
 # Changelog
 
+## Phase 4 safety validation follow-up — 2026-10-15
+
+- Refused policy writes when the target changes during confirmation or after backup preparation; added mocked recovery coverage for state-file write failures.
+- Improved read-only host evidence and policy-cycle result reporting. The 74-check mocked suite passed; native read-only validation remained partial. Live Phase 4A/4B validation is still pending an isolated recoverable test environment and authorization.
+
 ## Phase 4 validation preparation — 2026-10-15
 
 - Reconstructed project state and documented a gated Phase 4A policy-cycle and Phase 4B recovery matrix. No application behavior changed.

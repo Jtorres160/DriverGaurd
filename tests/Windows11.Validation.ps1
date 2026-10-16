@@ -43,16 +43,17 @@ function Get-Snapshot {
     }
     return [pscustomobject]@{ PolicyKeyExists=($null -ne $key); PolicyValues=$values; StateFiles=$files }
 }
-function Compare-Snapshot($Before,$After) {
-    if ($Before.PolicyKeyExists -ne $After.PolicyKeyExists) { return $false }
-    foreach ($property in @('PolicyValues','StateFiles')) {
-        $left=$Before.$property; $right=$After.$property
-        if ($left.Count -ne $right.Count) { return $false }
-        foreach ($name in $left.Keys) {
-            if (-not $right.ContainsKey($name) -or $left[$name] -cne $right[$name]) { return $false }
-        }
+function Compare-Map($Left,$Right) {
+    if ($Left.Count -ne $Right.Count) { return $false }
+    foreach ($name in $Left.Keys) {
+        if (-not $Right.ContainsKey($name) -or $Left[$name] -cne $Right[$name]) { return $false }
     }
     return $true
+}
+function Compare-Snapshot($Before,$After) {
+    return $Before.PolicyKeyExists -eq $After.PolicyKeyExists -and
+        (Compare-Map $Before.PolicyValues $After.PolicyValues) -and
+        (Compare-Map $Before.StateFiles $After.StateFiles)
 }
 function Invoke-DriverGuard([string]$Action) {
     Write-Host "Running DriverGuard $Action"
@@ -86,9 +87,10 @@ if ($Mode -eq 'PolicyCycle') {
     $after=Get-Snapshot
     Write-Host ('After Restore: '+($after | ConvertTo-Json -Depth 5 -Compress))
     if ($restoreCode -ne 0) { throw "Restore exited $restoreCode. Inspect recovery state." }
-    $policySame=($before.PolicyKeyExists -eq $after.PolicyKeyExists) -and ((ConvertTo-Json $before.PolicyValues -Compress) -ceq (ConvertTo-Json $after.PolicyValues -Compress))
-    if ($policySame) { Write-Host 'Policy key and values: exact before/after match. Check reboot persistence separately.'; exit 0 }
-    Write-Host 'Policy key or values differ from baseline. Inspect before restoring VM snapshot.'
+    $valuesSame=Compare-Map $before.PolicyValues $after.PolicyValues
+    if ($valuesSame -and $before.PolicyKeyExists -eq $after.PolicyKeyExists) { Write-Host 'PolicyCycle: PASS - policy key and values match baseline. Check reboot persistence separately.'; exit 0 }
+    if ($valuesSame) { Write-Host 'PolicyCycle: PARTIAL - policy values match baseline, but key presence differs. An empty key may remain after restoring an originally absent value.'; exit 2 }
+    Write-Host 'PolicyCycle: FAIL - policy values differ from baseline. Inspect before restoring VM snapshot.'
     exit 1
 }
 
@@ -101,6 +103,15 @@ if (-not (Compare-Snapshot $comparisonFixture $reorderedFixture) -or (Compare-Sn
 }
 Write-Host 'Snapshot comparison self-check: PASS (order independent; changed binary value detected)'
 Write-Host 'AUTOMATED READ-ONLY HOST VALIDATION (unit tests use disposable local fixtures)'
+try {
+    $identity=[Security.Principal.WindowsIdentity]::GetCurrent()
+    $principal=New-Object Security.Principal.WindowsPrincipal($identity)
+    $os=Get-CimInstance Win32_OperatingSystem -ErrorAction Stop
+    $computer=Get-CimInstance Win32_ComputerSystem -ErrorAction Stop
+    Write-Host "Host: $($os.Caption) | version=$($os.Version) | build=$($os.BuildNumber) | administrator=$($principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator))"
+    Write-Host "Platform: $($computer.Manufacturer) $($computer.Model) | hypervisorPresent=$($computer.HypervisorPresent)"
+} catch { Write-Host "Host identity: UNAVAILABLE - $($_.Exception.Message)" }
+Write-Host 'Live policy cycle: NOT TESTED (requires an isolated recoverable machine and explicit authorization).'
 $before=Get-Snapshot
 & $shell -NoProfile -ExecutionPolicy RemoteSigned -File $unitTests
 $unitCode=$LASTEXITCODE

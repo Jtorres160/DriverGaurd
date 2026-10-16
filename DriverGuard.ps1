@@ -178,6 +178,11 @@ function Test-OriginalState($state,$backup) {
     if (-not $state.ValueExists) { return $true }
     return $state.Type -eq $backup.OriginalType -and $state.Value -eq $backup.OriginalValue
 }
+function Test-SamePolicyState($before,$after) {
+    return $before.KeyExists -eq $after.KeyExists -and
+        $before.ValueExists -eq $after.ValueExists -and
+        $before.Type -ceq $after.Type -and $before.Value -ceq $after.Value
+}
 function Confirm-Yes([string]$Prompt) { return (Read-Host "$Prompt Type YES to continue") -ceq 'YES' }
 function Request-Elevation([string]$RequestedAction) {
     if (Test-Admin) { return $false }
@@ -234,6 +239,7 @@ function Enable-Protection {
     Write-Host "Current policy: $label. DriverGuard will set REG_DWORD 1."
     Write-Host 'Recommend creating a Windows restore point first.'
     if (-not (Confirm-Yes 'Enable driver exclusion?')) { Write-Host 'Cancelled.'; return }
+    if (-not (Test-SamePolicyState $state (Read-Policy))) { throw 'Policy changed during confirmation; enabling refused. Inspect the current policy before retrying.' }
     Protect-DataDirectory
     if (-not $backup) {
         $backup = [pscustomobject]@{ OriginalKeyExists=$state.KeyExists; OriginalValueExists=$state.ValueExists; OriginalType=$state.Type; OriginalValue=$state.Value; Phase='Prepared'; OS="$($os.Name) $($os.Version)"; CreatedUtc=(Get-Date).ToUniversalTime().ToString('o') }
@@ -243,6 +249,7 @@ function Enable-Protection {
     } elseif ($backup.Phase -eq 'Restored') {
         $backup.Phase = 'Prepared'; Write-Atomic $script:BackupPath (Format-Backup $backup)
     }
+    if (-not (Test-SamePolicyState $state (Read-Policy))) { throw 'Policy changed after recovery preparation; enabling refused. Inspect the current policy and backup before retrying.' }
     Set-PolicyValue 1
     $after = Read-Policy
     if ($after.Type -ne 'DWord' -or $after.Value -ne '1') { throw "Policy write could not be verified; observed $(Get-PolicyLabel $after)." }
@@ -266,6 +273,7 @@ function Restore-Protection {
     if (-not ($state.Type -eq 'DWord' -and $state.Value -eq '1') -and -not (Test-OriginalState $state $backup)) { throw 'Current policy differs from DriverGuard s last write; restoration refused.' }
     Write-Host "Recorded original: $(if ($backup.OriginalValueExists -eq 'True') {"$($backup.OriginalType) $($backup.OriginalValue)"} else {'value absent'})."
     if (-not (Confirm-Yes 'Restore this exact value?')) { Write-Host 'Cancelled.'; return }
+    if (-not (Test-SamePolicyState $state (Read-Policy))) { throw 'Policy changed during confirmation; restoration refused. Inspect the current policy and backup before retrying.' }
     if ($backup.OriginalValueExists -eq 'True') { Set-PolicyValue ([int]$backup.OriginalValue) } else { Remove-PolicyValue }
     $after = Read-Policy
     if (-not (Test-OriginalState $after $backup)) { throw 'Restoration could not be verified; recovery backup retained.' }

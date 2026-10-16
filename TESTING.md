@@ -1,5 +1,13 @@
 # Testing
 
+## Phase 4 safe validation follow-up — October 15, 2026
+
+Commands from the repository root: `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\DriverGuard.Tests.ps1` passed **74/74** mocked checks, exit `0`; `powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\Windows11.Validation.ps1 -Mode ReadOnly` passed its snapshot self-check and embedded 74 checks, but native Diagnose and the harness exited `2` (PARTIAL) because structured driver-store inventory required elevation. The harness reported that monitored WindowsUpdate policy values and DriverGuard state-file hashes were unchanged. PowerShell 5.1 parsed the three changed scripts with zero syntax errors.
+
+New mocked cases cover policy changes during Enable and Restore confirmation, a change after the Prepared backup was written, failure of the initial backup write, failure of the Active-phase replacement after the policy write, and recovery from that Prepared record. The registry mock now returns a fresh value object on each read, as the real registry reader does. These results validate refusal and transaction ordering only in mocks.
+
+Read-only host checks reported Windows 11 IoT Enterprise LTSC build 26100, a standard-user token, Gigabyte X870 GAMING WIFI6, `HypervisorPresent=False`, and an absent WindowsUpdate policy key. Computer-scope `gpresult /r` returned access denied (exit `1`). Enrollment registry subkeys exist, but that alone does not identify an active MDM policy owner. A verified isolated test machine, rollback snapshot, and management-policy baseline have not been established. No live policy writes, elevation, UAC prompt, reboot, driver installation, or package deletion were run. Phase 4A/4B remain **PARTIAL**; see the [live readiness checklist](WINDOWS11_VALIDATION.md).
+
 ## Phase 4 safe follow-up — October 15, 2026
 
 From `E:\Cursor\DriveGaurd`, the mocked suite passed **63/63**, exit `0`, after adding regression coverage for a completed Restore followed by an external DWORD `1` policy change. Restore now refuses to use a `Restored` recovery record to overwrite that later external value. The read-only Windows 11 harness passed its snapshot comparison self-check, ran the same 63 mocked checks, and exited `2`: native Diagnose remained partial because structured driver-store enumeration required elevation. The harness reported unchanged WindowsUpdate policy values and DriverGuard state-file hashes. PowerShell 5.1 parsed the three changed scripts with zero syntax errors. No live policy write, elevation, reboot, GPU installation, or package deletion was performed. Phase 4A and 4B live scenarios remain pending the gates in [WINDOWS11_VALIDATION.md](WINDOWS11_VALIDATION.md).

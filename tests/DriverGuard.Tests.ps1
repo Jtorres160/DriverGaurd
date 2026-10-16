@@ -128,13 +128,14 @@ Throws { Read-Backup } 'Corrupt recovery backup refused'
 Remove-Item -LiteralPath $script:BackupPath -Force
 $script:BackupPath=$realBackupPath
 
-function Read-Policy { return $script:policy }
+function Read-Policy { return [pscustomobject]@{ KeyExists=$script:policy.KeyExists; ValueExists=$script:policy.ValueExists; Type=$script:policy.Type; Value=$script:policy.Value } }
 function Set-PolicyValue { param([int]$Value) if ($script:denyWrite) { throw 'Access denied' }; $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value=[string]$Value } }
 function Remove-PolicyValue { $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$false; Type=''; Value='' } }
 function Read-Backup { return $script:simBackup }
 function Protect-DataDirectory { }
-function Write-Atomic { param([string]$Path,[string]$Text) $data=@{}; foreach ($line in ($Text -split "`n")) { if ($line -match '^([^=]+)=(.*)$') { $data[$matches[1]]=$matches[2] } }; $script:simBackup=[pscustomobject]$data }
-function Confirm-Yes { param([string]$Prompt) return $true }
+$script:changeOnConfirm=$false; $script:changeAfterBackup=$false; $script:failBackupPhase=''
+function Write-Atomic { param([string]$Path,[string]$Text) $data=@{}; foreach ($line in ($Text -split "`n")) { if ($line -match '^([^=]+)=(.*)$') { $data[$matches[1]]=$matches[2] } }; if ($script:failBackupPhase -eq $data.Phase) { $script:failBackupPhase=''; throw 'Mock atomic state-file replacement failed' }; $script:simBackup=[pscustomobject]$data; if ($script:changeAfterBackup -and $script:simBackup.Phase -eq 'Prepared') { $script:policy.Value='7'; $script:changeAfterBackup=$false } }
+function Confirm-Yes { param([string]$Prompt) if ($script:changeOnConfirm) { $script:policy.Value='7'; $script:changeOnConfirm=$false }; return $true }
 $script:denyWrite=$false
 $script:simBackup=$null
 $script:policy=[pscustomobject]@{ KeyExists=$false; ValueExists=$false; Type=''; Value='' }
@@ -156,6 +157,28 @@ Restore-Protection | Out-Null
 $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
 Throws { Restore-Protection } 'Restored backup cannot authorize overwrite of external value one'
 Check ($script:policy.Value -eq '1' -and $script:simBackup.Phase -eq 'Restored') 'External value and restored backup remain intact'
+$script:simBackup=$null; $script:changeOnConfirm=$true
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'Enable refuses policy change during confirmation'
+Check ($script:policy.Value -eq '7' -and $null -eq $script:simBackup) 'Enable confirmation conflict creates no stale backup'
+$script:simBackup=$null; $script:changeAfterBackup=$true
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'Enable refuses policy change after backup preparation'
+Check ($script:policy.Value -eq '7' -and $script:simBackup.Phase -eq 'Prepared') 'Prepared backup retained without overwriting new policy'
+$script:simBackup=$sample; $script:simBackup.Phase='Active'; $script:changeOnConfirm=$true
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
+Throws { Restore-Protection } 'Restore refuses policy change during confirmation'
+Check ($script:policy.Value -eq '7' -and $script:simBackup.Phase -eq 'Active') 'Restore confirmation conflict leaves backup and policy intact'
+$script:simBackup=$null; $script:failBackupPhase='Prepared'
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'Failed initial backup write blocks policy change'
+Check ($script:policy.Value -eq '0' -and $null -eq $script:simBackup) 'Initial backup failure leaves baseline intact'
+$script:simBackup=$null; $script:failBackupPhase='Active'
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'Failed Active backup write reports interrupted enable'
+Check ($script:policy.Value -eq '1' -and $script:simBackup.Phase -eq 'Prepared') 'Interrupted enable retains Prepared recovery record'
+Restore-Protection | Out-Null
+Check ($script:policy.Value -eq '0' -and $script:simBackup.Phase -eq 'Restored') 'Prepared record restores original after Active write failure'
 $script:simBackup=$null
 $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
 Enable-Protection | Out-Null
