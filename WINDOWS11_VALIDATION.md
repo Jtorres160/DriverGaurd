@@ -1,5 +1,39 @@
 # Windows 11 validation checklist
 
+## Phase 4 execution record — October 15, 2026
+
+**Disposition:** Read-only validation completed; live Phase 4A and 4B deferred. Current host: Windows 11 IoT Enterprise LTSC, version `10.0.26100`, build `26100`, standard-user session. `Win32_ComputerSystem` reports `Gigabyte Technology Co., Ltd. X870 GAMING WIFI6` and `HypervisorPresent=False`; an isolated Windows test environment and usable VM snapshot or equivalent recovery mechanism were not confirmed. Explicit approval for a live policy cycle was not given.
+
+Commands actually run from `E:\Cursor\DriveGaurd`:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\DriverGuard.Tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\Windows11.Validation.ps1 -Mode ReadOnly
+```
+
+The first command exited `0` with 61 mocked passes and 0 failures. The second exited `2` as captured by PowerShell `$LASTEXITCODE`: its embedded mocked suite passed 61/61, while native `Diagnose` was partial because structured driver-store inventory required elevation. Its before/after comparison reported unchanged WindowsUpdate policy values and DriverGuard state-file hashes. An independent read found the entire `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate` key absent, and `%ProgramData%\DriverGuard\original-state.ini`, `DriverGuard.log`, `gpu-install.json`, and `%LOCALAPPDATA%\DriverGuard\DriverGuard-user.log` absent. No backup was created or verified by a live Enable. Final observed policy state was the same absent key; no unexpected monitored change was observed. No reboot or state-changing native test was performed.
+
+### Approval gate for a later live run
+
+Before any Phase 4A or 4B state-changing test, record the VM identity and isolation boundary, prove a usable snapshot or equivalent recovery mechanism, record a full independent baseline, and obtain explicit approval for the live policy cycle. Record the exact snapshot identifier and restoration procedure outside the guest. Use separate restored snapshots for fault injection and reboot scenarios; do not damage the sole original recovery record. Never install, uninstall, or delete a GPU driver in Phase 4. Do not reboot automatically.
+
+The policy cycle can create `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpdate` if absent and set only its `ExcludeWUDriversInQualityUpdate` `REG_DWORD` value to `1`. Restore removes that value when originally absent or writes its original DWORD `0`; an empty key created by Enable may remain. DriverGuard can create or update `%ProgramData%\DriverGuard\original-state.ini` (first original state and transaction phase) and `%ProgramData%\DriverGuard\DriverGuard.log`, and can adjust ACLs within `%ProgramData%\DriverGuard`. A cancelled UAC attempt may use `%LOCALAPPDATA%\DriverGuard\DriverGuard-user.log` for a failure record. The policy cycle does not require `gpu-install.json`, a vendor installer, PnPUtil deletion, or any GPU driver change. The original recovery file must be preserved for review.
+
+### Phase 4 scenario matrix for an approved isolated environment
+
+| Scenario | Baseline and action | Evidence required | Current result |
+|---|---|---|---|
+| 4A-1 elevation and UAC cancellation | Standard-user launch, cancel UAC before Enable; compare pre/post target, all sibling values, backup, and logs | No policy or backup change; accurate failure exit and user-log message | Not performed |
+| 4A-2 absent value cycle | Snapshot with absent target; run `PolicyCycle` interactively | Original absence saved before write; `DWord 1` readback; restored absence; sibling values unchanged; note any empty key | Not performed |
+| 4A-3 DWORD 0 cycle | Snapshot with target `DWord 0`; run `PolicyCycle` interactively | Original type/value saved; `1` readback; exact `DWord 0` restoration; sibling values unchanged | Not performed |
+| 4A-4 repeated Enable | After first Enable, invoke Enable again before Restore | Original backup content retained; no invented baseline; restore returns first original | Not performed |
+| 4B-1 reboot persistence | Reboot manually after Enable and in a separate cycle after Restore | Independent registry and backup readback on both sides of each reboot | Not performed |
+| 4B-2 interrupted Prepared | In disposable snapshots, interrupt once before policy write and once after | Diagnose reports state without repairing it; Restore reconciles intact original or requires confirmation from `1`; ambiguous Enable refuses | Not performed |
+| 4B-3 external conflict | On a disposable snapshot, alter target externally after Active phase | DriverGuard refuses silent overwrite; original recovery data retained | Not performed |
+| 4B-4 missing, corrupt, or unsafe backup | Separate disposable snapshots with each fault | Restore refuses; no policy write; failure output and log/exit code captured | Not performed |
+
+For each run, save the exact command, process exit code, timestamp, Windows edition/build, account privilege, independent registry dump including sibling values and types, recovery-file content and hash, before/after log hashes or lines, snapshot identifier, and any unexpected change. The harness `-Mode PolicyCycle -ApproveStateChanges` requires an already elevated shell and two typed gates; it does not execute the manual scenarios, validate the snapshot, or reboot. Registry readback verifies configuration only; Windows Update enforcement requires separate evidence.
+
 Record the edition, build, account privilege, timestamp, GPU model, active INF, policy type/value, backup phase, and DriverGuard commit for each run. Use a Windows 11 VM snapshot before any state-changing test. Save the diagnostic console output outside `%ProgramData%\DriverGuard` if a record is needed.
 
 ## Recorded Phase 3 run — October 15, 2026

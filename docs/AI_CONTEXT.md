@@ -2,6 +2,8 @@
 
 Last reviewed: 2026-10-15. This is a current-state handoff, not a substitute for source inspection. Follow the workflow in [AGENTS.md](../AGENTS.md) and check recent commits before work.
 
+Phase 4 preparation on 2026-10-15 added an execution matrix and read-only result in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md) and [TESTING.md](../TESTING.md). The implementation and safety model are unchanged. The current Windows 11 IoT Enterprise LTSC build 26100 host was not confirmed isolated or recoverable by snapshot, so no live policy cycle, reboot, or GPU operation was run. The safe mocked suite again passed 61/61; read-only native validation was partial (`2`) because structured driver-store inventory required elevation, with unchanged monitored policy and state-file hashes. Phase 4A/4B native outcomes remain pending the documented gates.
+
 ## Project and source map
 
 DriverGuard is a Windows 10/11 BAT menu and Windows PowerShell 5.1 helper. `DriverGuard.bat` launches the menu; `DriverGuard.ps1` owns policy, recovery, GPU inspection, guided installation, verification, cleanup, and the CLI-only read-only `Diagnose` action. `tests/DriverGuard.Tests.ps1` is a mocked, nondisruptive regression suite. `tests/Windows11.Validation.ps1` has a read-only host mode and a separately gated state-changing `PolicyCycle` mode. See [README.md](../README.md) for behavior, [TESTING.md](../TESTING.md) for coverage and limits, and [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md) for native validation steps.

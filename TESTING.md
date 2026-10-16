@@ -1,5 +1,20 @@
 # Testing
 
+## Phase 4 preparation and read-only result — October 15, 2026
+
+On the current Windows 11 IoT Enterprise LTSC build 26100 host, these commands were run from the repository root:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\DriverGuard.Tests.ps1
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\Windows11.Validation.ps1 -Mode ReadOnly
+```
+
+The mocked suite exited `0`: **61 passed, 0 failed**. The native read-only harness exited `2` (confirmed from PowerShell's `$LASTEXITCODE`): its embedded mocked suite passed 61/61, and native `Diagnose` exited `2` because structured `Get-WindowsDriver -Online` inventory required elevation. Raw read-only PnPUtil Display inventory was available. The harness reported that all monitored WindowsUpdate policy values and SHA-256 hashes of the backup, journal, system log, and user log were unchanged. An independent read found the WindowsUpdate policy key absent and each of those DriverGuard state files absent. These results are read-only host observations and mocked tests, not a live policy cycle or evidence of Windows Update enforcement.
+
+The host reports `Gigabyte Technology Co., Ltd. X870 GAMING WIFI6` and `HypervisorPresent=False`. An isolated test environment and a usable snapshot or equivalent recovery mechanism were **not confirmed**, and no approval for a live policy cycle was given. Phase 4A live elevation, backup, Enable, repeated Enable, Restore, unrelated-setting preservation, and UAC cancellation remain **not performed**. Phase 4B reboot persistence, interrupted Prepared recovery, external conflict, damaged recovery file, and live logging/exit-code cases also remain **not performed**. No reboot, registry write, GPU installation, or driver deletion was run.
+
+The Phase 4 execution matrix and approval gates are in [WINDOWS11_VALIDATION.md](WINDOWS11_VALIDATION.md). The existing `PolicyCycle` harness covers only one interactive Enable/Restore cycle from an absent or DWORD `0` baseline; it does not establish isolation or snapshot availability, repeat Enable, UAC cancellation, reboot behavior, or all recovery failure cases. Its `-ApproveStateChanges` switch and typed prompt are local guards, not substitutes for the required external approval and recovery checks.
+
 Run the nondisruptive suite from the `DriveGaurd` repository root (the directory containing `DriverGuard.ps1`):
 
 ```powershell

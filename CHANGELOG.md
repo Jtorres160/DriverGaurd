@@ -1,5 +1,11 @@
 # Changelog
 
+## Phase 4 validation preparation — 2026-10-15
+
+- Reconstructed project state and documented a gated Phase 4A policy-cycle and Phase 4B recovery matrix. No application behavior changed.
+- Re-ran the safe mocked suite: 61 passed, 0 failed. The read-only Windows 11 harness returned partial (`2`) because structured driver-store inventory required elevation; monitored policy values and DriverGuard state-file hashes were unchanged.
+- Live policy modification, reboot recovery, UAC cancellation, conflict/fault injection, GPU operations, and Windows Update enforcement remain unverified. Isolation, snapshot recovery, and explicit approval were not established on the current host.
+
 ## Phase 2 diagnostics — 2026-10-15
 
 - Added a CLI-only, read-only `Diagnose` action for native GPU, active INF, driver-store, provenance, policy, backup, and installation-journal observations. The BAT menu is unchanged.
