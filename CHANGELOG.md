@@ -1,5 +1,11 @@
 # Changelog
 
+## Phase 2 diagnostics — 2026-10-15
+
+- Added a CLI-only, read-only `Diagnose` action for native GPU, active INF, driver-store, provenance, policy, backup, and installation-journal observations. The BAT menu is unchanged.
+- Reports unavailable evidence sources explicitly and shows raw PnPUtil Display inventory when structured driver-store access needs elevation.
+- Added a Windows 11 validation checklist. The mocked suite reports 58 passes; one standard-user native diagnostic pass was completed without policy or driver changes.
+
 ## 1.1.1 — 2026-10-15
 
 - Restricted INF hardware matching to Manufacturer-referenced model sections for the running Windows architecture and version; rejected package path links.

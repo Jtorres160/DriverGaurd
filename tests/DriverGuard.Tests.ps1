@@ -180,7 +180,7 @@ Check ($script:simBackup.Phase -eq 'Restored') 'Prepared backup reconciles intac
 $script:DataDir=$tmp
 $script:packagePresent=$true
 $script:pnputilCalls=New-Object Collections.Generic.List[string]
-function Get-DriverPackages { if ($script:packagePresent) { [pscustomobject]@{ Inf='oem1.inf'; Class='Display'; Provider='NVIDIA' } } }
+function Get-DriverPackages { if ($script:packagePresent) { [pscustomobject]@{ Inf='oem1.inf'; OriginalInf='nv_fixture.inf'; Class='Display'; Provider='NVIDIA' } } }
 function Get-DeviceUsageInventory { return @() }
 function pnputil.exe {
     $script:pnputilCalls.Add(($args -join ' '))
@@ -200,6 +200,16 @@ function Test-InstallerCompatibility { param($Gpu,[string]$Installer,[string]$In
 function Start-Process { param([string]$FilePath,[switch]$Wait,[switch]$PassThru) [pscustomobject]@{ ExitCode=5 } }
 Throws { Install-GpuDriver } 'Failed manufacturer installer exit reported'
 Check ($script:testJournal.State -eq 'Failed' -and @($script:logEntries | Where-Object { $_ -match 'GPU install\|FAILED' }).Count -gt 0) 'Failed install journal and log recorded'
+
+function Get-OS { [pscustomobject]@{ Name='Windows Test'; Version='10.0'; Build=22631 } }
+function Test-Admin { return $false }
+function Get-UpdateHistory { param([switch]$Strict) return @() }
+function Get-SetupEvidence { param([string]$InstanceId,[string]$Inf,[switch]$Strict) return @() }
+function Get-EventEvidence { param([string]$InstanceId,[switch]$Strict) return @() }
+$beforeLogs=$script:logEntries.Count
+$report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'Policy:' -and $report -match 'GPU:' -and $report -match 'Driver store association:' -and $report -match 'Provenance:') 'Read-only diagnostics report required sources'
+Check ($script:logEntries.Count -eq $beforeLogs) 'Read-only diagnostics writes no activity log'
 
 Remove-Item -LiteralPath $tmp -Recurse -Force
 Write-Host "RESULT: $script:passed passed; $script:failed failed"

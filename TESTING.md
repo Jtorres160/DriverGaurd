@@ -6,7 +6,9 @@ Run the nondisruptive suite from the `DriveGaurd` repository root (the directory
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\DriverGuard.Tests.ps1
 ```
 
-The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry, CIM, PnPUtil, signing, installer, journal, and restart calls. It never invokes a real driver installer, `pnputil /delete-driver`, or live policy write. The v1.1.1 run on October 15, 2026 reported **56 passed, 0 failed** under Windows PowerShell 5.1. This is a mocked result, not a live Windows policy or GPU compatibility pass.
+The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry, CIM, PnPUtil, signing, installer, journal, and restart calls. It never invokes a real driver installer, `pnputil /delete-driver`, or live policy write. The Phase 2 run on October 15, 2026 reported **58 passed, 0 failed** under Windows PowerShell 5.1. This is a mocked result, not a live Windows policy or GPU compatibility pass.
+
+The read-only native diagnostic action was also run on a Windows 11 IoT Enterprise LTSC host, build 26100, as a standard user. It found one NVIDIA GPU with active `oem23.inf`, five successful Windows Update history items, zero matching SetupAPI sections, two Device Setup events, no DriverGuard policy value or backup, and **Unknown origin**. `Get-WindowsDriver -Online` required elevation; the report displayed raw read-only PnPUtil Display inventory and did not claim a verified structured package association. Before/after SHA-256 checks found the DriverGuard log files unchanged. This observation is specific to this host.
 
 | ID | Case | Expected | Actual | Status |
 |---|---|---|---|---|
@@ -26,7 +28,7 @@ The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry,
 | A14 | Restart after restoring | Original state persists | No isolated Windows VM available | Not tested |
 | A15 | BAT path with spaces | Menu and elevation work | Menu launch/exit worked in path with spaces; UAC continuation not run | Partial |
 
-Additional mocked checks passed for invalid registry type, reenable after verified restore, denied write, and backup format round trip. An interrupted policy operation, failed backup creation, unexpected values, offline use, repeated live launches, and missing ProgramData directory still require isolated Windows tests.
+Additional mocked checks passed for invalid registry type, reenable after verified restore, denied write, backup format round trip, and diagnostics with no activity-log write. Real interrupted operations, failed backup creation, unexpected values, offline use, repeated live launches, and missing ProgramData directory still require isolated Windows tests.
 
 ## GPU v1.1.1 cases
 
@@ -57,6 +59,8 @@ Additional mocked checks passed for invalid registry type, reenable after verifi
 No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, vendor installer behavior, package catalog behavior, or live PnPUtil deletion. These require snapshots and explicit approval in an isolated Windows 10/11 VM with suitable GPUs or pass-through devices.
 
 ## Suggested isolated validation
+
+Use the detailed [Windows 11 validation checklist](WINDOWS11_VALIDATION.md) to record read-only observations first and keep potentially disruptive tests in a snapshotted environment.
 
 1. Snapshot a Windows 11 Pro VM and record the OS build, registry value/type, Display devices, active INFs, Windows Update history, and driver store inventory.
 2. Run A01–A15 with separate snapshots for absent, DWORD 0, DWORD 1, malformed backup, denied registry access, cancelled UAC, external policy change, and reboot cases. Confirm security and cumulative update settings remain unchanged.
