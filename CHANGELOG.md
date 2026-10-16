@@ -1,9 +1,14 @@
 # Changelog
 
+## Phase 4 cancellation and reboot follow-up — 2026-10-16
+
+- Recorded live VMware Status passes for standard-user UAC decline, UAC approval followed by `NO` at Enable, and persistence of DWORD `0`/`Restored` after reboot.
+- Kept Phase 4 partial pending the remaining safety checks. Windows Update enforcement remains unverified. No application code changed.
+
 ## Phase 4 VMware validation record — 2026-10-16
 
 - Recorded live Windows 11 Home build 26300 VMware passes for absent-value Enable/Restore, repeated Enable, enabled-state reboot persistence, real `Prepared` interruption recovery, FreshCycle to a DWORD `0` baseline and targeted archive checks, Enable cancellation, corrected Active conflict refusal, and invalid-text backup detection with Enable refusal and recovery-file replacement from a saved copy.
-- Phase 4A/4B remain partial for UAC, other fault paths, and post-Restore reboot. Windows Update enforcement remains unverified; the final registry read/write interval is not atomic. No application code changed in this documentation update.
+- Phase 4A/4B remain partial for other fault paths. Later UAC and post-Restore reboot Status checks passed. Windows Update enforcement remains unverified; the final registry read/write interval is not atomic. No application code changed in this documentation update.
 
 ## Active Restore conflict correction — 2026-10-16
 

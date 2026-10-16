@@ -1,11 +1,21 @@
 # Validation matrix
 
+## Phase 4 UAC and post-Restore reboot — October 16, 2026
+
+| Case | Live VMware observation | Status and limit |
+|---|---|---|
+| Standard-user UAC decline | Status afterward: DWORD `0`, `VALID (Restored)` | PASS for observed no-change state; no independent file hashes, logs, or exit code supplied |
+| UAC approval, then `NO` at Enable | Elevated PowerShell launched; Status afterward: DWORD `0`, `VALID (Restored)` | PASS for observed cancellation; no independent file hashes, logs, or exit code supplied |
+| Reboot after Restore | Status after restart: DWORD `0`, `VALID (Restored)`, `External change: No` | PASS for observed persistence; no independent post-reboot registry/file hash supplied |
+
+Remaining Phase 4 release-blocking and optional checks are listed in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md). Windows Update enforcement is **UNVERIFIED**.
+
 ## Restore policy conflict case — October 16, 2026
 
 | Case | Evidence | Result | Remaining validation |
 |---|---|---|---|
 | Active record; external DWORD `1` to original DWORD `0` | Real Windows 11 Home build 26300 VMware: Enable wrote `1`, recovery was valid `Active`, Status flagged the manual DWORD `0` change | Old Restore prompted and tester answered `NO`; after commit `b75aa77`, corrected Restore refused before confirmation, leaving DWORD `0` and `Active`. Manual return to `1` allowed normal Restore to DWORD `0`/`Restored` | PASS for this conflict; removed/unsupported values and final read/write race NOT TESTED live. No byte-for-byte recovery-file hash supplied |
-| Normal cycles, FreshCycle, reboot, Prepared recovery, and damaged file | User-reported VMware runs with snapshots; separate local 141/141 PowerShell 5.1 regression checks | PASS for absent and DWORD `0` target restoration, enabled-state reboot persistence, real after-write `Prepared` recovery, tested archive checks, and invalid-text backup detection/Enable refusal | PARTIAL for post-Restore reboot, UAC, other interruption/fault and damaged-backup variants; registry readback does not verify Windows Update enforcement |
+| Normal cycles, FreshCycle, reboot, Prepared recovery, and damaged file | User-reported VMware runs with snapshots; separate local 141/141 PowerShell 5.1 regression checks | PASS for absent and DWORD `0` target restoration, enabled-state and post-Restore reboot observations, UAC and Enable cancellation, real after-write `Prepared` recovery, targeted archive checks, and invalid-text backup detection/Enable refusal | PARTIAL for other interruption/fault and damaged-backup variants; registry readback does not verify Windows Update enforcement |
 
 The VMware discovery is a policy workflow observation and does not add a GPU provenance ground-truth case to the matrix below.
 

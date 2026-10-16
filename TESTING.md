@@ -1,12 +1,16 @@
 # Testing
 
+## Latest Phase 4 VMware results — October 16, 2026
+
+The tester reports three additional live Windows 11 VMware observations. **PASS:** standard-user UAC decline left Status at DWORD `0` and `VALID (Restored)`; UAC approval launched elevated PowerShell, then `NO` at Enable confirmation left the same state; and a reboot after Restore left Status at DWORD `0`, `VALID (Restored)`, with `External change: No`. These are Status observations, not a new automated suite or independent file-hash/log/exit-code evidence. Previously passed VMware scenarios were not repeated for this documentation update. The current [Phase 4 matrix and remaining checklist](WINDOWS11_VALIDATION.md) separate release-blocking safety cases from optional hardening. Windows Update enforcement remains **UNVERIFIED**.
+
 ## Phase 4 VMware follow-up — October 16, 2026
 
 The tester reports live Windows 11 Home build 26300 results from VMware Workstation Pro, using an Administrator Command Prompt and multiple recovery snapshots. **PASS:** an absent-value Enable/Restore cycle (independent DWORD `1` readback, valid `Active` record, repeated Enable retaining that record, and restored absence); DWORD `1` and `Active` surviving a reboot, followed by successful Restore; recovery of the earlier real PowerShell 5.1 `Prepared`/DWORD `1` interruption to the original absent value; a FreshCycle from a prior absent baseline to a new DWORD `0` baseline, including archive verification, Active transition, and independent `REG_DWORD 0x0` readback after Restore; and an Enable prompt declined with `NO` that left DWORD `0` and the valid `Restored` record intact. Archive validation checked expected fields, the prior absent baseline, ownership, and write permissions; it was not a complete filesystem security audit.
 
 **PASS after correction:** with an `Active` record and original DWORD `0`, a manual external change from `1` to `0` made Status report `External change: Yes`. The old Restore offered confirmation; the tester answered `NO`. After installing commit `b75aa77673cc0717e12f48c922dad5b27d73e269` in the VM, Restore refused before confirmation, and Status still showed DWORD `0`, valid `Active`, and the external change. The tester manually returned the value to `1`; Status then reported no external change, and normal Restore returned DWORD `0` with a valid `Restored` record. **PASS for the tested corruption case:** after saving a valid record, replacing the primary file with invalid text made Status report `CORRUPT` and `External change: Unknown`; Enable refused with “Recovery backup is malformed.” DWORD `0` remained unchanged, and copying back the saved record restored valid `Restored` status. These are user-reported live VM observations; no new VM test was run during this documentation update.
 
-Phase 4A and 4B remain **PARTIAL**: UAC cancellation/elevation, other interruption and failure-injection paths, unsupported conflict types/removal, and the remaining matrix cases need live evidence. Windows 11 Home registry persistence does not establish Windows Update enforcement (**UNVERIFIED**). The final registry check/write interval is not atomic. The development PowerShell 5.1 suite passed 141/141 after the conflict fix; this is local automated evidence, separate from the VM tests.
+Phase 4A and 4B remain **PARTIAL**: later UAC and post-Restore reboot observations passed as recorded above, while other interruption and failure-injection paths, unsupported conflict types/removal, and the remaining matrix cases need live evidence. Windows 11 Home registry persistence does not establish Windows Update enforcement (**UNVERIFIED**). The final registry check/write interval is not atomic. The development PowerShell 5.1 suite passed 141/141 after the conflict fix; this is local automated evidence, separate from the VM tests.
 
 ## Active Restore external-policy conflict — October 16, 2026
 
@@ -97,8 +101,8 @@ The read-only native diagnostic action was also run on a Windows 11 IoT Enterpri
 
 | ID | Case | Expected | Actual | Status |
 |---|---|---|---|---|
-| A01 | Standard-user menu/status | Read-only actions work | Not run on standard-user Windows session | Not tested |
-| A02 | Cancel UAC | No change | Not run | Not tested |
+| A01 | Standard-user menu/status | Read-only actions work | Status observed after standard-user UAC decline; full menu path not reported | PARTIAL |
+| A02 | Cancel UAC | No change | UAC declined; Status remained DWORD `0`/`VALID (Restored)` | PASS for observed state; logs/hashes not supplied |
 | A03 | Enable from absent | Save absence; write 1 | Mock and VMware readback passed | PASS, live and mocked |
 | A04 | Enable from DWORD 0 | Save 0; write 1 | FreshCycle captured 0 and enabled 1 in VMware | PASS, tested FreshCycle path; ordinary Enable from 0 remains mocked |
 | A05 | Already DWORD 1 | No write or invented backup | Mock passed | Pass, mocked |
@@ -110,7 +114,7 @@ The read-only native diagnostic action was also run on a Windows 11 IoT Enterpri
 | A11 | External change | Refuse overwrite | Mock passed; corrected Active/DWORD `0` refusal confirmed in VMware | PASS for tested conflict; other variants mocked |
 | A12 | Invalid menu input | Return to menu | BAT inspection only | Not tested |
 | A13 | Restart after enabling | Policy persists | VMware reboot retained DWORD `1` and valid `Active` | PASS, live |
-| A14 | Restart after restoring | Original state persists | No post-Restore reboot reported | NOT TESTED |
+| A14 | Restart after restoring | Original state persists | VMware reboot Status: DWORD `0`, `VALID (Restored)`, `External change: No` | PASS for observed state; independent hashes not supplied |
 | A15 | BAT path with spaces | Menu and elevation work | Menu launch/exit worked in path with spaces; UAC continuation not run | Partial |
 
 Additional mocked checks passed for invalid registry type, reenable after verified restore, denied write, backup format round trip, and diagnostics with no activity-log write. One real `Prepared`/DWORD `1` interruption was recovered in VMware. Other interruption and failure-injection cases, failed backup creation, unexpected values, offline use, and a missing ProgramData directory still require isolated Windows tests.
