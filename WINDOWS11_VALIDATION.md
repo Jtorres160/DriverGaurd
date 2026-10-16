@@ -1,5 +1,11 @@
 # Windows 11 validation checklist
 
+## Active Restore conflict discovered in VMware — October 16, 2026
+
+On a real Windows 11 VMware run, the target began as DWORD `0`; DriverGuard Enable wrote DWORD `1` and the recovery record was valid `Active`. After a manual external change to DWORD `0`, Status reported `External change: Yes`. Restore nevertheless offered confirmation because the Active guard accepted the original baseline. The tester entered `NO`, so this observation does not include an unsafe Restore write. The corrected guard and post-confirmation recheck passed mocked local tests but **have not been live-tested**.
+
+For the next isolated VM test, start from a documented snapshot and Active/DWORD `1`, change the target externally to DWORD `0`, then verify Restore refuses **before** confirmation and leaves the target and recovery record byte-for-byte unchanged. Repeat with an externally removed value and an unsupported type/value. In separate restored snapshots, verify normal Active/DWORD `1` Restore returns exact DWORD `0` and exact absence, and Prepared interruption recovery still works. Capture commands, exit codes, policy type/value and recovery-file hash before and after each case. The registry can still change after the final read and before the write because this is not an atomic compare-and-swap operation.
+
 ## Phase 4A VMware finding — October 16, 2026
 
 The user reported that a Windows 11 Home build 26300 VM with an initially absent target value ran Enable, wrote `REG_DWORD 1`, and then failed to replace the existing `Prepared` recovery file because the `File.Replace` backup path was null. Status showed a valid `Prepared` record and incomplete operation. The code fix was reproduced with disposable Windows PowerShell 5.1 files and passed local regression tests, but **has not been retested in that VM**. Do not run Enable again against `Prepared` plus value `1`; assess the VM's current policy and recovery record separately before any authorized Restore or snapshot rollback. Phase 4A and 4B remain partial.
@@ -57,7 +63,7 @@ The policy cycle can create `HKLM\SOFTWARE\Policies\Microsoft\Windows\WindowsUpd
 | 4A-4 repeated Enable | After first Enable, invoke Enable again before Restore | Original backup content retained; no invented baseline; restore returns first original | Not performed |
 | 4B-1 reboot persistence | Reboot manually after Enable and in a separate cycle after Restore | Independent registry and backup readback on both sides of each reboot | Not performed |
 | 4B-2 interrupted Prepared | In disposable snapshots, interrupt once before policy write and once after | Diagnose reports state without repairing it; Restore reconciles intact original or requires confirmation from `1`; ambiguous Enable refuses | Not performed |
-| 4B-3 external conflict | On a disposable snapshot, alter target externally after Active phase | DriverGuard refuses silent overwrite; original recovery data retained | Not performed |
+| 4B-3 external conflict | On a disposable snapshot, alter target externally after Active phase | DriverGuard refuses before confirmation; target and original recovery data retained | Old behavior observed in VMware for DWORD `0`: Status flagged the conflict, Restore prompted, tester answered `NO`. Corrected refusal not yet live-tested. |
 | Fresh recovery cycle | After a complete Restore, use a separate snapshot with DWORD `0` (and another with absent), then select menu A | Prior Restored record archived, new exact baseline captured, Enable reaches Active, Restore returns exact baseline; interrupted Prepared remains recoverable | Not performed |
 | 4B-4 missing, corrupt, or unsafe backup | Separate disposable snapshots with each fault | Restore refuses; no policy write; failure output and log/exit code captured | Not performed |
 

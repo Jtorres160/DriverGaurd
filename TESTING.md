@@ -1,5 +1,11 @@
 # Testing
 
+## Active Restore external-policy conflict — October 16, 2026
+
+In a real Windows 11 VMware test, the original policy was DWORD `0`; Enable wrote DWORD `1` and left a valid `Active` recovery record. The tester then changed the value outside DriverGuard back to DWORD `0`. Status correctly reported `External change: Yes`, but Restore reached its confirmation prompt because its Active guard also accepted the recorded original baseline. The tester answered `NO`; no unsafe Restore occurred. This was a live discovery of the old guard, **not** a live test of the correction.
+
+Restore now requires the recorded `LastWritten` DWORD `1` for an Active record before prompting, and rereads the policy after confirmation before writing. The separate Prepared reconciliation path remains available. Mocked tests cover Active success, external DWORD `0`, removal, unsupported type/value, unchanged registry and recovery record after refusal, the confirmation race, Prepared recovery, and exact DWORD `0` and absent restoration. The full Windows PowerShell 5.1 suite passed **141/141**, exit `0`; parser checks found zero errors in the application and both test scripts. No live registry test ran on the development PC. The corrected conflict refusal still needs isolated VMware validation.
+
 ## Fresh recovery cycle — October 16, 2026
 
 In the VMware test, a completed absent-value Enable/Restore cycle left a valid `Restored` record. After the tester manually set the value to DWORD `0`, ordinary Enable refused because that record described an absent original. This was a legitimate discovered recovery-record lifecycle limitation, **not** a failed registry-write test: the refusal occurred before confirmation and policy modification. The new explicit `FreshCycle` action archives the prior Restored record and captures the current disabled baseline. The previous VMware run did not exercise this new action.

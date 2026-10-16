@@ -1,5 +1,14 @@
 # Phase 5/6 validation matrix
 
+## Restore policy conflict case — October 16, 2026
+
+| Case | Evidence | Result | Remaining validation |
+|---|---|---|---|
+| Active record; external DWORD `1` to original DWORD `0` | Real Windows 11 VMware: Enable wrote `1`, recovery was valid `Active`, Status reported an external change after manual DWORD `0` edit | Old Restore reached confirmation; tester entered `NO`, so no unsafe Restore write was observed | Corrected pre-confirmation refusal and unchanged recovery file require a new VMware run |
+| Active conflicts, normal restore, and Prepared recovery | 141/141 local PowerShell 5.1 regression checks, including mocked registry and disposable file behavior | Corrected guard, recheck, exact baselines, and reconciliation pass locally | Native conflict, race, and recovery outcomes remain unverified |
+
+The VMware discovery is a policy workflow observation and does not add a GPU provenance ground-truth case to the matrix below.
+
 Updated October 15, 2026. The counts below refer to **one physical GPU**, not independent installations: one real device with verified current identity, zero real installations with independently known origin, one real installation observed without an origin label, and 97 passing mocked assertions. The assertions are neither 97 physical devices nor an accuracy sample.
 
 | Evidence class | Windows version/build | GPU vendor/model | Active INF / driver version | Installation source ground truth | Available evidence | DriverGuard result / expected result | Status and limits |

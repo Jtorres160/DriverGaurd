@@ -1,5 +1,10 @@
 # Changelog
 
+## Active Restore conflict correction — 2026-10-16
+
+- Fixed Restore so an `Active` record requires the current policy to match DriverGuard's recorded DWORD `1` before confirmation; an external change to the original DWORD `0` now refuses. The post-confirmation policy read is retained and checked before writing.
+- Preserved Prepared reconciliation and exact DWORD `0` or absent baseline restoration. Added mocked conflict and no-change regression cases; corrected behavior awaits VMware validation.
+
 ## Fresh recovery cycle — 2026-10-16
 
 - Added explicit menu A / `-Action FreshCycle` for a valid `Restored` record and a disabled current policy. It archives and verifies the old record before capturing a new baseline; normal Enable conflict refusal remains.

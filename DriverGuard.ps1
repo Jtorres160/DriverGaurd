@@ -322,10 +322,13 @@ function Restore-Protection {
     }
     if ($backup.Phase -eq 'Restored' -and (Test-OriginalState $state $backup)) { Write-Host 'Original state is already restored.'; return }
     if ($backup.Phase -eq 'Restored') { throw 'Policy changed after DriverGuard restored the original state; restoration refused.' }
-    if (-not ($state.Type -eq 'DWord' -and $state.Value -eq '1') -and -not (Test-OriginalState $state $backup)) { throw 'Current policy differs from DriverGuard s last write; restoration refused.' }
+    if (-not ($state.Type -eq 'DWord' -and $state.Value -eq $backup.LastWritten) -and
+        ($backup.Phase -eq 'Active' -or -not (Test-OriginalState $state $backup))) { throw 'Current policy differs from DriverGuard s last write; restoration refused.' }
     Write-Host "Recorded original: $(if ($backup.OriginalValueExists -eq 'True') {"$($backup.OriginalType) $($backup.OriginalValue)"} else {'value absent'})."
     if (-not (Confirm-Yes 'Restore this exact value?')) { Write-Host 'Cancelled.'; return }
-    if (-not (Test-SamePolicyState $state (Read-Policy))) { throw 'Policy changed during confirmation; restoration refused. Inspect the current policy and backup before retrying.' }
+    $current = Read-Policy
+    if (-not (Test-SamePolicyState $state $current) -or
+        ($backup.Phase -eq 'Active' -and -not ($current.Type -eq 'DWord' -and $current.Value -eq $backup.LastWritten))) { throw 'Policy changed during confirmation; restoration refused. Inspect the current policy and backup before retrying.' }
     if ($backup.OriginalValueExists -eq 'True') { Set-PolicyValue ([int]$backup.OriginalValue) } else { Remove-PolicyValue }
     $after = Read-Policy
     if (-not (Test-OriginalState $after $backup)) { throw 'Restoration could not be verified; recovery backup retained.' }
