@@ -1,4 +1,4 @@
-# DriverGuard v1.1
+# DriverGuard v1.1.1
 
 DriverGuard is a small Windows 10/11 BAT menu with a built-in Windows PowerShell helper. It configures the Windows Update policy that excludes driver-classified packages from normal quality updates, records the original registry state for recovery, inspects physical NVIDIA/AMD/Intel GPUs, and offers a cautious route to replace and optionally remove one obsolete graphics package.
 
@@ -16,9 +16,9 @@ The script is intended for Windows PowerShell 5.1 on Windows 10 version 1607 or 
 4. **View logs**: shows system and current-user logs when present.
 5. **Help**: explains the policy and recovery.
 6. **Inspect GPUs**: lists physical PCI NVIDIA, AMD, and Intel display devices, their active INF, hardware IDs, driver details, staged third-party Display packages, and provenance evidence.
-7. **Guided installation**: requires an already downloaded manufacturer EXE and a matching signed Display INF in its extracted package tree. It checks both signatures, the EXE's vendor signer, a vendor or Microsoft hardware-certified INF signer, exact PCI vendor/device ID, and INF driver version before running the manufacturer's installer interactively. It exports the current package first and does not pass undocumented silent switches.
+7. **Guided installation**: requires an already downloaded manufacturer EXE and a signed Display INF beneath the EXE's package directory. It checks both signatures, the EXE's vendor signer, a vendor or Microsoft hardware-certified INF signer, and the selected GPU's PCI vendor/device ID in a Manufacturer-referenced model section applicable to the running Windows architecture and version. It rejects package path links, determines the INF driver version, then exports the current package before running the manufacturer's installer interactively.
 8. **Verify installation**: after a restart, rechecks the selected GPU, expected driver version, changed INF, provider, device status, and pending restart state.
-9. **Optional cleanup**: only after verification, checks that the old `oem#.inf` package is a unique Display package and is not in use by any enumerated device. It asks for explicit confirmation, exports that one package, and runs `pnputil /delete-driver oem#.inf` **without** `/uninstall` or `/force`. It verifies that the package disappeared.
+9. **Optional cleanup**: only after verification, checks that the old `oem#.inf` package is a unique Display package and is not in use by enumerated devices, including hidden and disconnected Display devices. Unreadable device usage blocks cleanup. It asks for explicit confirmation, exports that one package, and runs `pnputil /delete-driver oem#.inf` **without** `/uninstall` or `/force`. It verifies that the package disappeared.
 
 ### Policy scope
 
@@ -30,9 +30,9 @@ DriverGuard changes only:
 
 ### Recovery and logs
 
-The first successful Enable cycle records the original key/value presence, DWORD type/value, OS, timestamp, and operation phase in `%ProgramData%\DriverGuard\original-state.ini`. Repeated Enable keeps that original record. A verified Restore retains the record and marks it restored; later Enable can use the same original state if the current value still matches. Unsupported original types or values, missing/corrupt backup, unsafe file permissions, or conflicting external changes stop automatic restoration. DriverGuard never deletes the whole WindowsUpdate key.
+The first Enable attempt records the original key/value presence, DWORD type/value, OS, timestamp, and operation phase in `%ProgramData%\DriverGuard\original-state.ini` before writing the policy. Repeated Enable keeps that original record. Restore reconciles an interrupted `Prepared` phase: if the original value is intact, it marks the record restored; if the policy reads as `1`, it requires confirmation before restoring the recorded original. Enable refuses an ambiguous `Prepared` record with policy `1`. Unsupported original types or values, missing/corrupt backup, unsafe file permissions, or conflicting external changes stop automatic restoration. DriverGuard never deletes the whole WindowsUpdate key.
 
-System activity is logged to `%ProgramData%\DriverGuard\DriverGuard.log`; standard-user read-only actions log to `%LOCALAPPDATA%\DriverGuard\DriverGuard-user.log`. The installation journal is `%ProgramData%\DriverGuard\gpu-install.json`. DriverGuard restricts the system data directory to Administrators and SYSTEM for writes and checks state file ownership and ACLs before using recovery data. The GPU package export is retained in that directory. If an operation is interrupted, inspect status and logs before retrying.
+System activity is logged to `%ProgramData%\DriverGuard\DriverGuard.log`; standard-user read-only actions log to `%LOCALAPPDATA%\DriverGuard\DriverGuard-user.log`. The installation journal is `%ProgramData%\DriverGuard\gpu-install.json`. DriverGuard restricts the system data directory to Administrators and SYSTEM for writes and checks state file ownership and ACLs before using recovery data. The GPU package export is retained in that directory. If a policy operation is interrupted, inspect status and use Restore to reconcile the backup before retrying.
 
 ### GPU provenance
 
@@ -40,7 +40,7 @@ DriverGuard correlates per-device active INF information with available Windows 
 
 ### Installation limits
 
-A signed EXE and signed matching INF in one package tree are practical evidence of manufacturer and device compatibility; they cannot prove every action the EXE will take. DriverGuard therefore refuses an opaque EXE without a verifiable matching INF. Some official installers may be rejected because their INF is compressed, hidden, or not verifiable by `Get-AuthenticodeSignature`. Do not work around a rejection by disabling signature checks. Obtain an extracted package from the manufacturer or use its documented installer outside DriverGuard and inspect afterward. A changed INF and expected version must actually be running before cleanup is offered.
+A signed EXE and signed applicable INF in one package tree are practical evidence of manufacturer and device compatibility; they do not cryptographically prove that the EXE will install that particular INF or predict every action it will take. DriverGuard therefore refuses an opaque EXE without a verifiable matching INF. Some official installers may be rejected because their INF is compressed, hidden, or not verifiable by `Get-AuthenticodeSignature`. Do not work around a rejection by disabling signature checks. Obtain an extracted package from the manufacturer or use its documented installer outside DriverGuard and inspect afterward. A changed INF and expected version must actually be running before cleanup is offered.
 
 Create a Windows restore point before modifications when System Protection is available. Restart when required. DriverGuard does not remove a driver merely because Windows Update installed it. Never use cleanup to remove chipset, audio, network, or unrelated packages.
 

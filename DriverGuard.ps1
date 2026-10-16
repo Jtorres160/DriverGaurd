@@ -33,6 +33,7 @@ function Assert-Windows {
 }
 function Assert-SecureStatePath([string]$Path) {
     if (-not (Test-Path -LiteralPath $Path)) { return }
+    if ((Get-Item -LiteralPath $Path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "State path is a reparse point: $Path" }
     $acl = Get-Acl -LiteralPath $Path
     $owner = $acl.GetOwner([Security.Principal.SecurityIdentifier]).Value
     if ($owner -notin @('S-1-5-18','S-1-5-32-544')) { throw "State path has an untrusted owner: $Path" }
@@ -66,7 +67,7 @@ function Protect-DataDirectory {
     $readRule = New-Object Security.AccessControl.FileSystemAccessRule($sidUsers,[Security.AccessControl.FileSystemRights]::ReadAndExecute,$inherit,$propagate,[Security.AccessControl.AccessControlType]::Allow)
     $acl.AddAccessRule($readRule)
     Set-Acl -LiteralPath $script:DataDir -AclObject $acl
-    foreach ($path in @($script:BackupPath,$script:JournalPath)) {
+    foreach ($path in @($script:BackupPath,$script:JournalPath,$script:LogPath)) {
         if (Test-Path -LiteralPath $path) {
             $file = Get-Item -LiteralPath $path -Force
             if ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "State file is a reparse point: $path" }
@@ -97,6 +98,7 @@ function Write-Log([string]$Operation,[string]$Result,[string]$Detail) {
 }
 function Write-Atomic([string]$Path,[string]$Text) {
     Protect-DataDirectory
+    if (Test-Path -LiteralPath $Path) { Assert-SecureStatePath $Path }
     $temp = Join-Path $script:DataDir ([IO.Path]::GetRandomFileName())
     try {
         [IO.File]::WriteAllText($temp,$Text,(New-Object Text.UTF8Encoding($false)))
@@ -183,9 +185,9 @@ function Request-Elevation([string]$RequestedAction) {
     $code = "& '$scriptPath' -Action '$RequestedAction'"
     $encoded = [Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($code))
     try {
-        $proc = Start-Process -FilePath 'powershell.exe' -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -Wait -PassThru
-        if ($proc.ExitCode -ne 0) { Write-Warning "Elevated operation exited with code $($proc.ExitCode)." }
-    } catch { Write-Warning "Elevation was cancelled or failed: $($_.Exception.Message)" }
+        $proc = Start-Process -FilePath "$env:SystemRoot\System32\WindowsPowerShell\v1.0\powershell.exe" -Verb RunAs -ArgumentList "-NoProfile -ExecutionPolicy RemoteSigned -EncodedCommand $encoded" -Wait -PassThru
+        if ($proc.ExitCode -ne 0) { throw "Elevated operation exited with code $($proc.ExitCode)." }
+    } catch { throw "Elevation was cancelled or failed: $($_.Exception.Message)" }
     return $true
 }
 function Show-Status([switch]$Brief) {
@@ -219,7 +221,11 @@ function Enable-Protection {
     $state = Read-Policy; $label = Get-PolicyLabel $state
     if ($label -eq 'INVALID CONFIGURATION') { throw 'Unsupported policy type or value; no change made.' }
     $backup = Read-Backup
-    if ($label -eq 'EXCLUSION CONFIGURED') { Write-Host 'Already configured. No registry write or backup overwrite.'; Write-Log 'Enable' 'NO CHANGE' 'Already configured'; return }
+    if ($label -eq 'EXCLUSION CONFIGURED') {
+        if ($backup -and $backup.Phase -eq 'Prepared') { throw 'Prepared backup and policy value 1 require recovery review. Use Restore to recover the recorded original state.' }
+        if ($backup -and $backup.Phase -eq 'Active') { Write-Host 'Already configured; active recovery backup retained.'; return }
+        Write-Host 'Already configured externally. No registry write or backup overwrite.'; Write-Log 'Enable' 'NO CHANGE' 'Already configured'; return
+    }
     if ($backup -and $backup.Phase -ne 'Restored') {
         if (-not (Test-OriginalState $state $backup)) { throw 'Policy differs from the saved state; resolve the conflict before enabling.' }
     } elseif ($backup -and $backup.Phase -eq 'Restored') {
@@ -250,6 +256,11 @@ function Restore-Protection {
     $backup = Read-Backup
     if (-not $backup) { throw 'No recovery backup exists. Original configuration cannot be inferred.' }
     $state = Read-Policy
+    if ($backup.Phase -eq 'Prepared' -and (Test-OriginalState $state $backup)) {
+        $backup.Phase = 'Restored'; Write-Atomic $script:BackupPath (Format-Backup $backup)
+        Write-Log 'Restore' 'RECONCILED' 'Prepared operation left original policy intact'
+        Write-Host 'Interrupted operation reconciled: original policy was already intact.'; return
+    }
     if ($backup.Phase -eq 'Restored' -and (Test-OriginalState $state $backup)) { Write-Host 'Original state is already restored.'; return }
     if (-not ($state.Type -eq 'DWord' -and $state.Value -eq '1') -and -not (Test-OriginalState $state $backup)) { throw 'Current policy differs from DriverGuard s last write; restoration refused.' }
     Write-Host "Recorded original: $(if ($backup.OriginalValueExists -eq 'True') {"$($backup.OriginalType) $($backup.OriginalValue)"} else {'value absent'})."
@@ -347,16 +358,20 @@ function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
         $updateDate = [datetime]$_.Date
         @($setup | Where-Object { $_.Started -ne [datetime]::MinValue -and [Math]::Abs(($_.Started - $updateDate).TotalHours) -le 48 }).Count -gt 0
     })
+    $correlated = @($setup | Where-Object {
+        $started = $_.Started
+        $started -ne [datetime]::MinValue -and @($matchingTitles | Where-Object { [Math]::Abs(($started - [datetime]$_.Date).TotalHours) -le 48 }).Count -gt 0
+    })
     if ($wu.Count -gt 0) { $evidence.Add("Windows Update history: $($wu[0].Title) [$($wu[0].Date)]") }
     if (@($setup).Count -gt 0) { $evidence.Add("SetupAPI section: $($setup[-1].Header)") }
     if (@($events).Count -gt 0) { $evidence.Add("Device Setup event: $($events[0].Id) [$($events[0].TimeCreated)]") }
     if ($journal -and $journal.State -eq 'Verified' -and $journal.InstanceId -eq $gpu.InstanceId -and $journal.NewInf -eq $gpu.Inf -and $journal.NewVersion -eq $gpu.Version) {
         return [pscustomobject]@{ Classification='Manufacturer installation supported by evidence'; Evidence=@('DriverGuard verified signed manufacturer installer and running replacement driver') }
     }
-    if (@($setup | Where-Object WindowsUpdateMarker).Count -gt 0 -and $wu.Count -gt 0) {
+    if (@($correlated | Where-Object WindowsUpdateMarker).Count -gt 0 -and $wu.Count -gt 0) {
         return [pscustomobject]@{ Classification='Confirmed Windows Update installation'; Evidence=$evidence.ToArray() }
     }
-    if ($wu.Count -gt 0 -and @($setup).Count -gt 0) {
+    if ($wu.Count -gt 0 -and $correlated.Count -gt 0) {
         return [pscustomobject]@{ Classification='Likely Windows Update installation'; Evidence=$evidence.ToArray() }
     }
     return [pscustomobject]@{ Classification='Unknown origin'; Evidence=$evidence.ToArray() }
@@ -409,14 +424,50 @@ function Test-PendingRestart {
     } catch [System.Management.Automation.ItemNotFoundException] { } catch [System.Management.Automation.PSArgumentException] { }
     return $false
 }
+function Get-ApplicableInfModels([string]$Content) {
+    $sections = @{}
+    $current = ''
+    foreach ($raw in ($Content -split "`r?`n")) {
+        $line = ($raw -replace ';.*$','').Trim()
+        if ($line -match '^\[([^\]]+)\]$') { $current=$matches[1].Trim(); $sections[$current]=New-Object Collections.Generic.List[string]; continue }
+        if ($current -and $line) { $sections[$current].Add($line) }
+    }
+    $arch = if ([Environment]::Is64BitOperatingSystem) { if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') { 'NTarm64' } else { 'NTamd64' } } else { 'NTx86' }
+    $models = New-Object Collections.Generic.List[string]
+    if (-not $sections.ContainsKey('Manufacturer')) { throw 'INF has no Manufacturer section.' }
+    foreach ($line in $sections['Manufacturer']) {
+        if ($line -notmatch '^[^=]+\s*=\s*([^,\s]+)\s*(?:,(.*))?$') { continue }
+        $base=$matches[1]; $decorations=@()
+        if ($matches[2]) { $decorations=@($matches[2] -split '\s*,\s*') } else { $decorations=@('') }
+        foreach ($decoration in $decorations) {
+            if ($decoration -and $decoration -notmatch "^(?i:$arch)(?:\.|$)") { continue }
+            if ($decoration -match "^(?i:$arch)\.") {
+                $suffix=$decoration.Substring($arch.Length + 1)
+                if ($suffix -notmatch '^(\d+)\.(\d+)(?:\.\.\.(\d+))?$') { continue }
+                $osVersion=[Environment]::OSVersion.Version
+                if ([int]$matches[1] -gt $osVersion.Major -or ([int]$matches[1] -eq $osVersion.Major -and [int]$matches[2] -gt $osVersion.Minor)) { continue }
+                if ($matches[3] -and [int]$matches[3] -gt $osVersion.Build) { continue }
+            }
+            $name = if ($decoration) { "$base.$decoration" } else { $base }
+            if ($sections.ContainsKey($name)) { foreach ($model in $sections[$name]) { $models.Add($model) } }
+        }
+    }
+    return @($models)
+}
 function Test-InstallerCompatibility($gpu,[string]$Installer,[string]$InfPath) {
     if (-not $gpu -or $gpu.Vendor -notin @('NVIDIA','AMD','Intel')) { throw 'Select a supported physical GPU.' }
     if (-not (Test-Path -LiteralPath $Installer -PathType Leaf) -or [IO.Path]::GetExtension($Installer) -ne '.exe') { throw 'Installer must be an existing EXE file.' }
     if (-not (Test-Path -LiteralPath $InfPath -PathType Leaf) -or [IO.Path]::GetExtension($InfPath) -ne '.inf') { throw 'A matching extracted INF file is required.' }
     $exe = (Resolve-Path -LiteralPath $Installer).ProviderPath
     $inf = (Resolve-Path -LiteralPath $InfPath).ProviderPath
+    foreach ($path in @($exe,$inf)) { if ((Get-Item -LiteralPath $path -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer package paths cannot be reparse points.' } }
     $root = [IO.Path]::GetDirectoryName($exe).TrimEnd('\') + '\'
     if (-not $inf.StartsWith($root,[StringComparison]::OrdinalIgnoreCase)) { throw 'INF must be inside the installer package directory.' }
+    $parent = [IO.Path]::GetDirectoryName($inf)
+    while ($parent -and $parent.Length -ge $root.Length) {
+        if ((Get-Item -LiteralPath $parent -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Installer package tree cannot contain a junction or symbolic link.' }
+        $parent = [IO.Path]::GetDirectoryName($parent)
+    }
     $exeSignature = Get-AuthenticodeSignature -LiteralPath $exe
     $infSignature = Get-AuthenticodeSignature -LiteralPath $inf
     if ($exeSignature.Status -ne 'Valid' -or $infSignature.Status -ne 'Valid') { throw 'Installer and INF must both have valid trusted Authenticode/catalog signatures.' }
@@ -432,7 +483,8 @@ function Test-InstallerCompatibility($gpu,[string]$Installer,[string]$InfPath) {
     $device = [regex]::Match($gpu.InstanceId,'(?i)^PCI\\VEN_([0-9A-F]{4})&DEV_([0-9A-F]{4})')
     if (-not $device.Success) { throw 'GPU hardware ID cannot be verified.' }
     $needle = 'PCI\VEN_' + $device.Groups[1].Value + '&DEV_' + $device.Groups[2].Value
-    if ($content.IndexOf($needle,[StringComparison]::OrdinalIgnoreCase) -lt 0) { throw 'INF has no exact vendor/device hardware ID match.' }
+    $models = @(Get-ApplicableInfModels $content)
+    if (@($models | Where-Object { $_ -match '(?i)=\s*[^,]+\s*,\s*' + [regex]::Escape($needle) + '(?:&[^,\s]*)?(?:\s*,|\s*$)' }).Count -eq 0) { throw 'INF has no exact vendor/device match in an applicable architecture model section.' }
     $versions = @([regex]::Matches($content,'(?im)^\s*DriverVer\s*=\s*[^,\r\n]+,\s*([0-9]+(?:\.[0-9]+){1,3})') | ForEach-Object { $_.Groups[1].Value } | Select-Object -Unique)
     if ($versions.Count -ne 1) { throw 'INF driver version cannot be established unambiguously.' }
     return [pscustomobject]@{ Installer=$exe; InfPath=$inf; Version=$versions[0]; InstallerHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash; InfHash=(Get-FileHash -LiteralPath $inf -Algorithm SHA256).Hash; Signer=$exeSignature.SignerCertificate.Subject }
@@ -524,10 +576,32 @@ function Test-CleanupEligibility($journal,$gpu,$packages,$allSigned) {
     if ($journal.State -ne 'Verified') { return 'Replacement has not been verified.' }
     if ($gpu.InstanceId -ne $journal.InstanceId -or $gpu.Inf -ne $journal.NewInf -or $gpu.Version -ne $journal.NewVersion -or $gpu.Status -ne 'OK') { return 'Verified replacement is no longer active.' }
     if ($journal.OldInf -eq $gpu.Inf -or $journal.OldInf -notmatch '^oem\d+\.inf$') { return 'Old package is active or invalid.' }
+    if ($null -eq $allSigned) { return 'Device usage inventory is unavailable.' }
     if (@($allSigned | Where-Object { $_.InfName -eq $journal.OldInf }).Count -gt 0) { return 'Old package is still used by another device.' }
+    if (@($allSigned | Where-Object { $_.UsageUnknown }).Count -gt 0) { return 'Device usage is uncertain.' }
     $matches = @($packages | Where-Object { $_.Inf -eq $journal.OldInf })
     if ($matches.Count -ne 1 -or $matches[0].Class -ne 'Display') { return 'Old Display package is not uniquely identified.' }
     return $null
+}
+function Get-DeviceUsageInventory {
+    $signed = @(Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop)
+    $devices = @(Get-PnpDevice -ErrorAction Stop)
+    $inventory = New-Object Collections.Generic.List[object]
+    foreach ($driver in $signed) {
+        if (-not $driver.DeviceID -or -not $driver.InfName) { if ($driver.ClassGuid -eq $script:DisplayGuid) { $inventory.Add([pscustomobject]@{ InfName=''; UsageUnknown=$true }) }; continue }
+        $inventory.Add([pscustomobject]@{ InfName=[string]$driver.InfName; UsageUnknown=$false })
+    }
+    foreach ($device in $devices) {
+        if ($device.Class -ne 'Display' -and $device.ClassGuid -ne $script:DisplayGuid) { continue }
+        if (-not $device.InstanceId) { $inventory.Add([pscustomobject]@{ InfName=''; UsageUnknown=$true }); continue }
+        try {
+            $property = Get-PnpDeviceProperty -InstanceId $device.InstanceId -KeyName 'DEVPKEY_Device_DriverInfPath' -ErrorAction Stop
+            $inf = [string]$property.Data
+            if (-not $inf) { throw 'INF path unavailable' }
+            $inventory.Add([pscustomobject]@{ InfName=$inf; UsageUnknown=$false })
+        } catch { $inventory.Add([pscustomobject]@{ InfName=''; UsageUnknown=$true }) }
+    }
+    return $inventory.ToArray()
 }
 function Cleanup-GpuDriver {
     $null = Assert-Windows
@@ -538,14 +612,14 @@ function Cleanup-GpuDriver {
     $gpu = @(Get-Gpus | Where-Object { $_.InstanceId -eq $journal.InstanceId })
     if ($gpu.Count -ne 1) { throw 'Target GPU cannot be uniquely detected.' }
     $packages = @(Get-DriverPackages)
-    $signed = @(Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop)
+    $signed = @(Get-DeviceUsageInventory)
     $reason = Test-CleanupEligibility $journal $gpu[0] $packages $signed
     if ($reason) { Write-Log 'GPU cleanup' 'REFUSED' $reason; throw $reason }
     Write-Host "Obsolete package: $($journal.OldInf), previously used by $($journal.Model)."
     Write-Host "Active replacement: $($gpu[0].Inf), version $($gpu[0].Version)."
     Write-Host 'DriverGuard will export this specific old package, then request a non-forced PnPUtil deletion.'
     if (-not (Confirm-Yes "Remove only $($journal.OldInf)?")) { Write-Host 'Cancelled.'; return }
-    $reason = Test-CleanupEligibility $journal (@(Get-Gpus | Where-Object { $_.InstanceId -eq $journal.InstanceId }) | Select-Object -First 1) @(Get-DriverPackages) @(Get-CimInstance Win32_PnPSignedDriver -ErrorAction Stop)
+    $reason = Test-CleanupEligibility $journal (@(Get-Gpus | Where-Object { $_.InstanceId -eq $journal.InstanceId }) | Select-Object -First 1) @(Get-DriverPackages) @(Get-DeviceUsageInventory)
     if ($reason -or (Test-PendingRestart)) { throw "Cleanup conditions changed: $reason" }
     $export = Join-Path $script:DataDir ("export-$($journal.OldInf)-" + (Get-Date -Format 'yyyyMMddHHmmss'))
     Protect-DataDirectory

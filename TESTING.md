@@ -1,12 +1,12 @@
 # Testing
 
-Run the nondisruptive suite from the project directory:
+Run the nondisruptive suite from the `DriveGaurd` repository root (the directory containing `DriverGuard.ps1`):
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File .\tests\DriverGuard.Tests.ps1
 ```
 
-The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry, CIM, PnPUtil, signing, installer, journal, and restart calls. It never invokes a real driver installer, `pnputil /delete-driver`, or live policy write. On October 15, 2026, it reported **44 passed, 0 failed**. PowerShell parser validation reported no errors. The BAT menu launched and exited through option 0 both in the project folder and in a temporary folder containing spaces. A live Summary call reported `STATUS UNAVAILABLE: Access to a CIM resource was not available to the client` in this restricted execution environment. That is an environment limitation, not a Windows compatibility pass.
+The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry, CIM, PnPUtil, signing, installer, journal, and restart calls. It never invokes a real driver installer, `pnputil /delete-driver`, or live policy write. The v1.1.1 run on October 15, 2026 reported **56 passed, 0 failed** under Windows PowerShell 5.1. This is a mocked result, not a live Windows policy or GPU compatibility pass.
 
 | ID | Case | Expected | Actual | Status |
 |---|---|---|---|---|
@@ -28,7 +28,7 @@ The suite dot-sources `DriverGuard.ps1` in test mode and mocks Windows registry,
 
 Additional mocked checks passed for invalid registry type, reenable after verified restore, denied write, and backup format round trip. An interrupted policy operation, failed backup creation, unexpected values, offline use, repeated live launches, and missing ProgramData directory still require isolated Windows tests.
 
-## GPU v1.1 cases
+## GPU v1.1.1 cases
 
 | Case | Expected | Actual | Status |
 |---|---|---|---|
@@ -41,6 +41,8 @@ Additional mocked checks passed for invalid registry type, reenable after verifi
 | Unknown provenance | Provider/title alone insufficient | Mock passed | Pass, mocked |
 | Invalid installer file | Refused | Mock passed | Pass, mocked |
 | Installer/device mismatch | Refused | Mock passed | Pass, mocked |
+| Wrong architecture or future OS INF model | Refused | Mock passed | Pass, mocked |
+| Commented or unreferenced hardware ID | Refused | Mock passed | Pass, mocked |
 | Unsigned installer | Refused | Mock passed | Pass, mocked |
 | Failed driver installation | No cleanup | Mocked nonzero installer exit, failed journal, and log passed | Pass, mocked |
 | Interrupted installation | No success claim | Mock passed | Pass, mocked |
@@ -48,6 +50,8 @@ Additional mocked checks passed for invalid registry type, reenable after verifi
 | Manufacturer replacement | New INF/version running | Post-restart verification mock passed | Pass, mocked |
 | Safe obsolete cleanup | Eligible only when unique and unused | Eligibility and targeted non-forced command mock passed | Pass, mocked |
 | Active/shared driver refusal | Refused | Mock passed | Pass, mocked |
+| Hidden/disconnected device usage | Refused | Mock passed | Pass, mocked |
+| Unreadable device usage | Refused | Mock passed | Pass, mocked |
 | Detection and logging after reboot | Correct active INF logged | Mock passed | Pass, mocked |
 
 No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, vendor installer behavior, package catalog behavior, or live PnPUtil deletion. These require snapshots and explicit approval in an isolated Windows 10/11 VM with suitable GPUs or pass-through devices.

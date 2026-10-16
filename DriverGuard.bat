@@ -8,7 +8,7 @@ if not exist "%DG_SCRIPT%" (
 :menu
 cls
 echo ====================================================
-echo                 DRIVERGUARD v1.1
+echo                 DRIVERGUARD v1.1.1
 echo          Windows Driver Update Control
 echo ====================================================
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%DG_SCRIPT%" -Action Summary

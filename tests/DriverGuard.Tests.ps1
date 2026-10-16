@@ -49,12 +49,15 @@ $setup[0].WindowsUpdateMarker=$true
 Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Confirmed Windows Update installation') 'Explicit WU SetupAPI evidence'
 $setup[0].Started=(Get-Date).AddDays(-10)
 Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Unknown origin') 'Unrelated timestamps remain unknown'
+$setup=@([pscustomobject]@{ WindowsUpdateMarker=$true; Header='old install'; Started=(Get-Date).AddDays(-10) },[pscustomobject]@{ WindowsUpdateMarker=$false; Header='new install'; Started=(Get-Date) })
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Likely Windows Update installation') 'Unrelated WU marker cannot confirm current install'
 
 $tmp=Join-Path $PSScriptRoot 'fixture-package'
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
 $exe=Join-Path $tmp 'setup.exe'; $inf=Join-Path $tmp 'display.inf'
 [IO.File]::WriteAllText($exe,'fixture')
-[IO.File]::WriteAllText($inf,"[Version]`nClass=Display`nDriverVer=01/01/2026,2.0`nPCI\VEN_10DE&DEV_1234")
+$validInf="[Version]`nClass=Display`nDriverVer=01/01/2026,2.0`n[Manufacturer]`n%NVIDIA%=NvidiaModels,NTamd64`n[NvidiaModels.NTamd64]`n%GPU%=Install,PCI\VEN_10DE&DEV_1234"
+[IO.File]::WriteAllText($inf,$validInf)
 function Get-AuthenticodeSignature { param([string]$LiteralPath) [pscustomobject]@{ Status='Valid'; SignerCertificate=[pscustomobject]@{ Subject='CN=NVIDIA Corporation' } } }
 Throws { Test-InstallerCompatibility $gpu (Join-Path $tmp 'missing.exe') $inf } 'Invalid installer file refused'
 Check ((Test-InstallerCompatibility $gpu $exe $inf).Version -eq '2.0') 'Signed matching package accepted'
@@ -62,6 +65,17 @@ function Get-AuthenticodeSignature { param([string]$LiteralPath) if ($LiteralPat
 Check ((Test-InstallerCompatibility $gpu $exe $inf).Version -eq '2.0') 'Microsoft certified INF with vendor EXE accepted'
 $other=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_9999\A'
 Throws { Test-InstallerCompatibility $other $exe $inf } 'Installer and device incompatibility refused'
+[IO.File]::WriteAllText($inf,($validInf -replace 'NTamd64','NTarm64'))
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Wrong architecture model section refused'
+[IO.File]::WriteAllText($inf,($validInf -replace 'NTamd64','NTamd64.99.0'))
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Future OS model section refused'
+[IO.File]::WriteAllText($inf,($validInf -replace 'NTamd64','NTamd64.10.0...99999'))
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Future Windows build model section refused'
+[IO.File]::WriteAllText($inf,($validInf.Replace('[NvidiaModels.NTamd64]','[OtherModels.NTamd64]')))
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Unreferenced hardware model section refused'
+[IO.File]::WriteAllText($inf,"[Version]`nClass=Display`nDriverVer=01/01/2026,2.0`n; PCI\VEN_10DE&DEV_1234`n[Manufacturer]`n%NVIDIA%=NvidiaModels,NTamd64`n[NvidiaModels.NTamd64]`n%Other%=Install,PCI\VEN_10DE&DEV_9999")
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Commented hardware ID refused'
+[IO.File]::WriteAllText($inf,$validInf)
 function Get-AuthenticodeSignature { param([string]$LiteralPath) [pscustomobject]@{ Status='NotSigned'; SignerCertificate=$null } }
 Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Unsigned installer refused'
 
@@ -72,7 +86,14 @@ Check ((Test-CleanupEligibility $j $new $packages @()) -eq $null) 'Safe obsolete
 Check ((Test-CleanupEligibility $j $new @($packages+$packages) @()) -match 'uniquely') 'Multiple matching INF entries refused'
 Check ((Test-CleanupEligibility $j (New-Gpu 'NVIDIA' $j.InstanceId 'oem1.inf' '2.0') $packages @()) -ne $null) 'Active package removal refused'
 Check ((Test-CleanupEligibility $j $new $packages @([pscustomobject]@{ InfName='oem1.inf' })) -match 'another device') 'Shared package removal refused'
+Check ((Test-CleanupEligibility $j $new $packages @([pscustomobject]@{ InfName=''; UsageUnknown=$true })) -match 'uncertain') 'Unknown device usage refused'
 Check ((Test-CleanupEligibility (New-Journal 'Failed') $new $packages @()) -match 'not been verified') 'Failed installation blocks cleanup'
+$script:testSigned=@([pscustomobject]@{ ClassGuid=$script:DisplayGuid; DeviceID='PCI\VEN_10DE&DEV_5678\H'; InfName='oem1.inf' })
+function Get-PnpDevice { return @([pscustomobject]@{ Class='Display'; InstanceId='PCI\VEN_10DE&DEV_5678\H' }) }
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) [pscustomobject]@{ Data='oem1.inf' } }
+Check (@(Get-DeviceUsageInventory | Where-Object { $_.InfName -eq 'oem1.inf' }).Count -gt 0) 'Hidden or disconnected device usage detected'
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) throw 'Property unavailable' }
+Check (@(Get-DeviceUsageInventory | Where-Object UsageUnknown).Count -gt 0) 'Unreadable device usage becomes uncertain'
 
 function Assert-Windows { [pscustomobject]@{ Name='Windows Test'; Build=22631; Version='10.0' } }
 function Request-Elevation { param([string]$RequestedAction) return $false }
@@ -146,11 +167,21 @@ Check ($script:policy.Value -eq '0') 'Denied write does not change observed poli
 $script:denyWrite=$false
 $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='String'; Value='1' }
 Throws { Enable-Protection } 'Invalid policy type refused'
+$script:simBackup=$sample; $script:simBackup.Phase='Prepared'
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
+Throws { Enable-Protection } 'Prepared backup with value one refuses ambiguous enable'
+Restore-Protection | Out-Null
+Check ($script:policy.Value -eq '0' -and $script:simBackup.Phase -eq 'Restored') 'Prepared backup restores original after interrupted write'
+$script:simBackup=$sample; $script:simBackup.Phase='Prepared'
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Restore-Protection | Out-Null
+Check ($script:simBackup.Phase -eq 'Restored') 'Prepared backup reconciles intact original'
 
 $script:DataDir=$tmp
 $script:packagePresent=$true
 $script:pnputilCalls=New-Object Collections.Generic.List[string]
 function Get-DriverPackages { if ($script:packagePresent) { [pscustomobject]@{ Inf='oem1.inf'; Class='Display'; Provider='NVIDIA' } } }
+function Get-DeviceUsageInventory { return @() }
 function pnputil.exe {
     $script:pnputilCalls.Add(($args -join ' '))
     if ($args[0] -eq '/export-driver') { [IO.File]::WriteAllText((Join-Path $args[2] 'saved.inf'),'fixture') }
