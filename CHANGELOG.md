@@ -1,5 +1,10 @@
 # Changelog
 
+## Fresh recovery cycle — 2026-10-16
+
+- Added explicit menu A / `-Action FreshCycle` for a valid `Restored` record and a disabled current policy. It archives and verifies the old record before capturing a new baseline; normal Enable conflict refusal remains.
+- Added regression coverage for DWORD `0` and absent baselines, exact restoration, refusal and cancellation, archive/replacement failures, and interrupted rotation.
+
 ## Phase 4A recovery-file correction — 2026-10-16
 
 - Fixed Windows PowerShell 5.1 atomic replacement of an existing recovery file by providing a real rollback path. The prior `Prepared` state is retained if replacement verification fails.

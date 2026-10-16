@@ -1,5 +1,5 @@
 ﻿param(
-    [ValidateSet('Summary','Enable','Restore','Status','Log','Help','Inspect','Install','Verify','Cleanup','Diagnose')]
+    [ValidateSet('Summary','Enable','FreshCycle','Restore','Status','Log','Help','Inspect','Install','Verify','Cleanup','Diagnose')]
     [string]$Action = 'Summary'
 )
 
@@ -109,9 +109,13 @@ function Replace-ExistingFile([string]$Source,[string]$Destination,[string]$Expe
     } catch { throw "Atomic replacement verification failed; prior state retained at $previous. $($_.Exception.Message)" }
     [IO.File]::Delete($previous)
 }
-function Write-Atomic([string]$Path,[string]$Text) {
+function Write-Atomic([string]$Path,[string]$Text,[string]$ExpectedCurrentText) {
     Protect-DataDirectory
     if (Test-Path -LiteralPath $Path) { Assert-SecureStatePath $Path }
+    if ($PSBoundParameters.ContainsKey('ExpectedCurrentText')) {
+        $current = Read-Backup
+        if (-not $current -or $current.Phase -ne 'Restored' -or (Format-Backup $current) -cne $ExpectedCurrentText) { throw 'Recovery record changed before replacement; fresh cycle refused.' }
+    }
     $temp = Join-Path $script:DataDir ([IO.Path]::GetRandomFileName())
     try {
         [IO.File]::WriteAllText($temp,$Text,(New-Object Text.UTF8Encoding($false)))
@@ -119,6 +123,10 @@ function Write-Atomic([string]$Path,[string]$Text) {
         $fileAcl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
         Set-Acl -LiteralPath $temp -AclObject $fileAcl
         if (Test-Path -LiteralPath $Path) {
+            if ($PSBoundParameters.ContainsKey('ExpectedCurrentText')) {
+                $current = Read-Backup
+                if (-not $current -or $current.Phase -ne 'Restored' -or (Format-Backup $current) -cne $ExpectedCurrentText) { throw 'Recovery record changed before replacement; fresh cycle refused.' }
+            }
             Replace-ExistingFile $temp $Path $Text
         } else { [IO.File]::Move($temp,$Path) }
     } finally { if (Test-Path -LiteralPath $temp) { Remove-Item -LiteralPath $temp -Force } }
@@ -168,10 +176,10 @@ function Remove-PolicyValue {
 function Format-Backup($b) {
     return "Version=1`nOriginalKeyExists=$($b.OriginalKeyExists)`nOriginalValueExists=$($b.OriginalValueExists)`nOriginalType=$($b.OriginalType)`nOriginalValue=$($b.OriginalValue)`nLastWritten=1`nPhase=$($b.Phase)`nOS=$($b.OS)`nCreatedUtc=$($b.CreatedUtc)`n"
 }
-function Read-Backup {
-    if (-not (Test-Path -LiteralPath $script:BackupPath)) { return $null }
-    if ($env:DRIVERGUARD_TEST_MODE -ne '1') { Assert-SecureStatePath $script:DataDir; Assert-SecureStatePath $script:BackupPath }
-    $raw = [IO.File]::ReadAllLines($script:BackupPath)
+function Read-Backup([string]$Path = $script:BackupPath) {
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    if ($env:DRIVERGUARD_TEST_MODE -ne '1') { Assert-SecureStatePath $script:DataDir; Assert-SecureStatePath $Path }
+    $raw = [IO.File]::ReadAllLines($Path)
     $map = @{}
     foreach ($line in $raw) {
         if ($line -notmatch '^([A-Za-z]+)=(.*)$' -or $map.ContainsKey($matches[1])) { throw 'Recovery backup is malformed.' }
@@ -185,6 +193,25 @@ function Read-Backup {
     } elseif ($map.OriginalType -ne '' -or $map.OriginalValue -ne '') { throw 'Recovery backup has inconsistent absence data.' }
     if ($map.OriginalKeyExists -eq 'False' -and $map.OriginalValueExists -eq 'True') { throw 'Recovery backup has inconsistent key data.' }
     return [pscustomobject]$map
+}
+function Archive-RestoredBackup($backup) {
+    Protect-DataDirectory
+    $current = Read-Backup
+    if (-not $current -or $current.Phase -ne 'Restored' -or (Format-Backup $current) -cne (Format-Backup $backup)) { throw 'Recovery record changed before archival; fresh cycle refused.' }
+    $original = [IO.File]::ReadAllBytes($script:BackupPath)
+    $archive = Join-Path $script:DataDir ('original-state-' + [guid]::NewGuid().ToString('N') + '.restored.ini')
+    [IO.File]::Copy($script:BackupPath,$archive,$false)
+    $acl = Get-Acl -LiteralPath $archive
+    $acl.SetOwner((New-Object Security.Principal.SecurityIdentifier('S-1-5-32-544')))
+    Set-Acl -LiteralPath $archive -AclObject $acl
+    Assert-SecureStatePath $archive
+    $saved = Read-Backup $archive
+    if ($saved.Phase -ne 'Restored' -or (Format-Backup $saved) -cne (Format-Backup $backup) -or
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($archive)) -cne [Convert]::ToBase64String($original) -or
+        [Convert]::ToBase64String([IO.File]::ReadAllBytes($script:BackupPath)) -cne [Convert]::ToBase64String($original)) {
+        throw 'Recovery archive verification failed; fresh cycle refused.'
+    }
+    return $archive
 }
 function Test-OriginalState($state,$backup) {
     if ([string]$state.ValueExists -ne $backup.OriginalValueExists) { return $false }
@@ -233,12 +260,14 @@ function Show-Status([switch]$Brief) {
         Write-Host 'Managed devices may have Group Policy, MDM, or WSUS settings that supersede local changes.'
     }
 }
-function Enable-Protection {
+function Enable-Protection([switch]$FreshCycle) {
     $os = Assert-Windows
-    if (Request-Elevation 'Enable') { return }
+    if (Request-Elevation $(if ($FreshCycle) {'FreshCycle'} else {'Enable'})) { return }
     $state = Read-Policy; $label = Get-PolicyLabel $state
     if ($label -eq 'INVALID CONFIGURATION') { throw 'Unsupported policy type or value; no change made.' }
     $backup = Read-Backup
+    if ($FreshCycle -and (-not $backup -or $backup.Phase -ne 'Restored')) { throw 'Fresh cycle requires a valid Restored recovery record.' }
+    if ($FreshCycle -and $label -notin @('POLICY DISABLED','NOT CONFIGURED')) { throw 'Fresh cycle requires a disabled policy (DWORD 0 or absent).' }
     if ($label -eq 'EXCLUSION CONFIGURED') {
         if ($backup -and $backup.Phase -eq 'Prepared') { throw 'Prepared backup and policy value 1 require recovery review. Use Restore to recover the recorded original state.' }
         if ($backup -and $backup.Phase -eq 'Active') { Write-Host 'Already configured; active recovery backup retained.'; return }
@@ -246,15 +275,25 @@ function Enable-Protection {
     }
     if ($backup -and $backup.Phase -ne 'Restored') {
         if (-not (Test-OriginalState $state $backup)) { throw 'Policy differs from the saved state; resolve the conflict before enabling.' }
-    } elseif ($backup -and $backup.Phase -eq 'Restored') {
+    } elseif ($backup -and $backup.Phase -eq 'Restored' -and -not $FreshCycle) {
         if (-not (Test-OriginalState $state $backup)) { throw 'Policy differs from the recorded original state; resolve the conflict before enabling.' }
     }
     Write-Host "Current policy: $label. DriverGuard will set REG_DWORD 1."
+    if ($FreshCycle) { Write-Host 'Fresh cycle: archive the Restored record and capture the current policy as a new original.' }
     Write-Host 'Recommend creating a Windows restore point first.'
-    if (-not (Confirm-Yes 'Enable driver exclusion?')) { Write-Host 'Cancelled.'; return }
+    if (-not (Confirm-Yes $(if ($FreshCycle) {'Archive the Restored record and start a fresh recovery cycle?'} else {'Enable driver exclusion?'}))) { Write-Host 'Cancelled.'; return }
     if (-not (Test-SamePolicyState $state (Read-Policy))) { throw 'Policy changed during confirmation; enabling refused. Inspect the current policy before retrying.' }
     Protect-DataDirectory
-    if (-not $backup) {
+    if ($FreshCycle) {
+        $archive = Archive-RestoredBackup $backup
+        $stillRestored = Read-Backup
+        if (-not $stillRestored -or $stillRestored.Phase -ne 'Restored' -or (Format-Backup $stillRestored) -cne (Format-Backup $backup)) { throw 'Recovery record changed during archival; fresh cycle refused.' }
+        $backup = [pscustomobject]@{ OriginalKeyExists=$state.KeyExists; OriginalValueExists=$state.ValueExists; OriginalType=$state.Type; OriginalValue=$state.Value; Phase='Prepared'; OS="$($os.Name) $($os.Version)"; CreatedUtc=(Get-Date).ToUniversalTime().ToString('o') }
+        Write-Atomic $script:BackupPath (Format-Backup $backup) (Format-Backup $stillRestored)
+        $prepared = Read-Backup
+        if (-not $prepared -or $prepared.Phase -ne 'Prepared' -or (Format-Backup $prepared) -cne (Format-Backup $backup)) { throw 'New recovery record could not be verified; policy unchanged. Inspect the archive and current record.' }
+        Write-Log 'Fresh cycle' 'BACKUP' "Prior=$archive; Original=$label"
+    } elseif (-not $backup) {
         $backup = [pscustomobject]@{ OriginalKeyExists=$state.KeyExists; OriginalValueExists=$state.ValueExists; OriginalType=$state.Type; OriginalValue=$state.Value; Phase='Prepared'; OS="$($os.Name) $($os.Version)"; CreatedUtc=(Get-Date).ToUniversalTime().ToString('o') }
         Write-Atomic $script:BackupPath (Format-Backup $backup)
         $null = Read-Backup
@@ -783,6 +822,8 @@ Enable saves the first observed policy value in ProgramData\DriverGuard, then se
 only ExcludeWUDriversInQualityUpdate to REG_DWORD 1. Restore uses that saved value,
 preserving the difference between absent and DWORD 0. A conflicting external change
 blocks automatic restoration. The recovery record and log remain after restoration.
+FreshCycle explicitly archives a valid Restored record, captures a new disabled
+baseline, and enables protection. It refuses Active or Prepared records.
 
 GPU inspection reads device, Windows Update, SetupAPI, event, and driver store data.
 Origin may remain unknown. Guided installation requires a trusted signed EXE and a
@@ -801,6 +842,7 @@ if ($env:DRIVERGUARD_TEST_MODE -ne '1') {
         switch ($Action) {
             'Summary' { Show-Status -Brief }
             'Enable' { Enable-Protection }
+            'FreshCycle' { Enable-Protection -FreshCycle }
             'Restore' { Restore-Protection }
             'Status' { Show-Status; Write-Log 'Policy status' 'OBSERVED' (Get-PolicyLabel (Read-Policy)) }
             'Log' {

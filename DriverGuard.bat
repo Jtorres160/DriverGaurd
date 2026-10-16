@@ -22,9 +22,11 @@ echo  [6] Inspect GPUs and driver provenance
 echo  [7] Guided manufacturer driver installation
 echo  [8] Verify installation after restart
 echo  [9] Review optional obsolete package cleanup
+echo  [A] Start a fresh recovery cycle from a disabled policy
 echo  [0] Exit
 echo ----------------------------------------------------
-choice /C 0123456789 /N /M "Enter your choice: "
+choice /C 0123456789A /N /M "Enter your choice: "
+if errorlevel 11 goto freshcycle
 if errorlevel 10 goto cleanup
 if errorlevel 9 goto verify
 if errorlevel 8 goto install
@@ -39,6 +41,9 @@ echo Input cancelled.
 goto menu
 :enable
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%DG_SCRIPT%" -Action Enable
+goto done
+:freshcycle
+powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%DG_SCRIPT%" -Action FreshCycle
 goto done
 :restore
 powershell.exe -NoProfile -ExecutionPolicy RemoteSigned -File "%DG_SCRIPT%" -Action Restore

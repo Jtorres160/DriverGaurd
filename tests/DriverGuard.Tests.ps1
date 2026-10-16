@@ -199,14 +199,43 @@ Throws { Read-Backup } 'Corrupt recovery backup refused'
 Remove-Item -LiteralPath $script:BackupPath -Force
 $script:BackupPath=$realBackupPath
 
+& {
+    # Exercise real archival on disposable files; ACL writes require elevation and are stubbed.
+    function Protect-DataDirectory { }
+    function Assert-SecureStatePath([string]$Path) { if (-not (Test-Path -LiteralPath $Path)) { throw 'Archive path missing.' } }
+    function Set-Acl { param([string]$LiteralPath,$AclObject) }
+    $oldDir=$script:DataDir; $oldPath=$script:BackupPath
+    $dir=Join-Path $PSScriptRoot ('archive-fixture-'+[guid]::NewGuid().ToString('N'))
+    [IO.Directory]::CreateDirectory($dir) | Out-Null
+    try {
+        $script:DataDir=$dir; $script:BackupPath=Join-Path $dir 'original-state.ini'
+        $restored=[pscustomobject]@{ OriginalKeyExists='False'; OriginalValueExists='False'; OriginalType=''; OriginalValue=''; Phase='Restored'; OS='Windows Test'; CreatedUtc='2026-01-01T00:00:00Z' }
+        [IO.File]::WriteAllText($script:BackupPath,(Format-Backup $restored))
+        $archive=Archive-RestoredBackup (Read-Backup)
+        Check ((Test-Path -LiteralPath $archive) -and (Read-Backup $archive).Phase -eq 'Restored' -and (Read-Backup).Phase -eq 'Restored') 'Real archival preserves valid Restored source and copy'
+        $prepared=[pscustomobject]@{ OriginalKeyExists='True'; OriginalValueExists='True'; OriginalType='DWord'; OriginalValue='0'; Phase='Prepared'; OS='Windows Test'; CreatedUtc='2026-01-02T00:00:00Z' }
+        Write-Atomic $script:BackupPath (Format-Backup $prepared) (Format-Backup $restored)
+        Check ((Read-Backup).Phase -eq 'Prepared' -and (Read-Backup $archive).Phase -eq 'Restored') 'Real atomic rotation keeps archived history and new Prepared record'
+        Throws { Write-Atomic $script:BackupPath (Format-Backup $prepared) (Format-Backup $restored) } 'Real rotation refuses to replace Prepared record'
+        [IO.File]::WriteAllText($script:BackupPath,'Version=1')
+        Throws { Archive-RestoredBackup $restored } 'Real archival refuses damaged source'
+        Check (@(Get-ChildItem -LiteralPath $dir -Filter '*.restored.ini').Count -eq 1) 'Damaged source creates no additional archive'
+    } finally {
+        $script:DataDir=$oldDir; $script:BackupPath=$oldPath
+        foreach ($file in @(Get-ChildItem -LiteralPath $dir -File)) { [IO.File]::Delete($file.FullName) }
+        [IO.Directory]::Delete($dir)
+    }
+}
+
 function Read-Policy { return [pscustomobject]@{ KeyExists=$script:policy.KeyExists; ValueExists=$script:policy.ValueExists; Type=$script:policy.Type; Value=$script:policy.Value } }
 function Set-PolicyValue { param([int]$Value) if ($script:denyWrite) { throw 'Access denied' }; $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value=[string]$Value } }
 function Remove-PolicyValue { $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$false; Type=''; Value='' } }
-function Read-Backup { return $script:simBackup }
+function Read-Backup { if ($script:damageBackup) { throw 'Recovery backup is malformed.' }; return $script:simBackup }
 function Protect-DataDirectory { }
-$script:changeOnConfirm=$false; $script:changeAfterBackup=$false; $script:failBackupPhase=''
-function Write-Atomic { param([string]$Path,[string]$Text) $data=@{}; foreach ($line in ($Text -split "`n")) { if ($line -match '^([^=]+)=(.*)$') { $data[$matches[1]]=$matches[2] } }; if ($script:failBackupPhase -eq $data.Phase) { $script:failBackupPhase=''; throw 'Mock atomic state-file replacement failed' }; $script:simBackup=[pscustomobject]$data; if ($script:changeAfterBackup -and $script:simBackup.Phase -eq 'Prepared') { $script:policy.Value='7'; $script:changeAfterBackup=$false } }
-function Confirm-Yes { param([string]$Prompt) if ($script:changeOnConfirm) { $script:policy.Value='7'; $script:changeOnConfirm=$false }; return $true }
+$script:changeOnConfirm=$false; $script:changeAfterBackup=$false; $script:failBackupPhase=''; $script:cancelConfirm=$false; $script:damageBackup=$false; $script:failArchive=$false; $script:changeDuringArchive=$false; $script:changeBeforeAtomic=$false; $script:simArchives=@()
+function Archive-RestoredBackup { param($backup) if ($script:failArchive) { $script:failArchive=$false; throw 'Archive failed' }; $script:simArchives += (Format-Backup $backup); if ($script:changeDuringArchive) { $script:simBackup.Phase='Active'; $script:changeDuringArchive=$false }; return 'fixture-archive.ini' }
+function Write-Atomic { param([string]$Path,[string]$Text,[string]$ExpectedCurrentText) $data=@{}; foreach ($line in ($Text -split "`n")) { if ($line -match '^([^=]+)=(.*)$') { $data[$matches[1]]=$matches[2] } }; if ($script:changeBeforeAtomic) { $script:simBackup.Phase='Active'; $script:changeBeforeAtomic=$false }; if ($PSBoundParameters.ContainsKey('ExpectedCurrentText') -and ($script:simBackup.Phase -ne 'Restored' -or (Format-Backup $script:simBackup) -cne $ExpectedCurrentText)) { throw 'Recovery record changed before replacement' }; if ($script:failBackupPhase -eq $data.Phase) { $script:failBackupPhase=''; throw 'Mock atomic state-file replacement failed' }; $script:simBackup=[pscustomobject]$data; if ($script:changeAfterBackup -and $script:simBackup.Phase -eq 'Prepared') { $script:policy.Value='7'; $script:changeAfterBackup=$false } }
+function Confirm-Yes { param([string]$Prompt) if ($script:changeOnConfirm) { $script:policy.Value='7'; $script:changeOnConfirm=$false }; if ($script:cancelConfirm) { $script:cancelConfirm=$false; return $false }; return $true }
 $script:denyWrite=$false
 $script:simBackup=$null
 $script:policy=[pscustomobject]@{ KeyExists=$false; ValueExists=$false; Type=''; Value='' }
@@ -274,6 +303,60 @@ $script:simBackup=$sample; $script:simBackup.Phase='Prepared'
 $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
 Restore-Protection | Out-Null
 Check ($script:simBackup.Phase -eq 'Restored') 'Prepared backup reconciles intact original'
+
+function New-RestoredFixture { return [pscustomobject]@{ OriginalKeyExists='False'; OriginalValueExists='False'; OriginalType=''; OriginalValue=''; Phase='Restored'; OS='Windows Test'; CreatedUtc='2026-01-01T00:00:00Z' } }
+$script:simBackup=New-RestoredFixture
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'Ordinary Enable still refuses different Restored baseline'
+$script:cancelConfirm=$true
+Enable-Protection -FreshCycle | Out-Null
+Check ($script:policy.Value -eq '0' -and $script:simBackup.Phase -eq 'Restored' -and $script:simArchives.Count -eq 0) 'Fresh cycle cancellation changes nothing'
+$script:changeOnConfirm=$true
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses registry change during confirmation'
+Check ($script:simBackup.Phase -eq 'Restored' -and $script:simArchives.Count -eq 0) 'Confirmation conflict retains old recovery record'
+$script:policy.Value='0'; $script:failArchive=$true
+Throws { Enable-Protection -FreshCycle } 'Archival failure blocks fresh cycle'
+Check ($script:simBackup.Phase -eq 'Restored' -and $script:policy.Value -eq '0') 'Archival failure retains old record and policy'
+$script:failBackupPhase='Prepared'
+Throws { Enable-Protection -FreshCycle } 'Prepared replacement failure blocks fresh cycle'
+Check ($script:simBackup.Phase -eq 'Restored' -and $script:policy.Value -eq '0' -and $script:simArchives.Count -eq 1) 'Replacement failure retains old record and archive'
+$script:changeDuringArchive=$true
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses record change during archival'
+Check ($script:simBackup.Phase -eq 'Active' -and $script:policy.Value -eq '0') 'Concurrent Active record is not replaced'
+$script:simBackup=New-RestoredFixture
+$script:changeBeforeAtomic=$true
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses record change before atomic replacement'
+Check ($script:simBackup.Phase -eq 'Active' -and $script:policy.Value -eq '0') 'Late Active record is not replaced'
+$script:simBackup=New-RestoredFixture
+Enable-Protection -FreshCycle | Out-Null
+Check ($script:policy.Value -eq '1' -and $script:simBackup.Phase -eq 'Active' -and $script:simBackup.OriginalValueExists -eq 'True' -and $script:simBackup.OriginalValue -eq '0' -and $script:simArchives.Count -eq 4) 'Fresh cycle from DWORD zero captures new baseline and archives prior record'
+Restore-Protection | Out-Null
+Check ($script:policy.ValueExists -and $script:policy.Value -eq '0' -and $script:simBackup.Phase -eq 'Restored') 'Fresh cycle restores exact DWORD zero'
+$script:simBackup=New-RestoredFixture
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$false; Type=''; Value='' }
+Enable-Protection -FreshCycle | Out-Null
+Check ($script:simBackup.OriginalValueExists -eq 'False' -and $script:policy.Value -eq '1') 'Fresh cycle from absent captures absence'
+Restore-Protection | Out-Null
+Check (-not $script:policy.ValueExists -and $script:simBackup.Phase -eq 'Restored') 'Fresh cycle restores exact absence'
+foreach ($phase in @('Prepared','Active')) {
+    $script:simBackup=New-RestoredFixture; $script:simBackup.Phase=$phase
+    $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+    $archiveCount=$script:simArchives.Count
+    Throws { Enable-Protection -FreshCycle } "Fresh cycle refuses $phase recovery record"
+    Check ($script:simBackup.Phase -eq $phase -and $script:simArchives.Count -eq $archiveCount) "$phase record remains untouched"
+}
+$script:simBackup=New-RestoredFixture; $script:damageBackup=$true
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses damaged recovery record'
+$script:damageBackup=$false
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses enabled policy'
+$script:simBackup=New-RestoredFixture; $script:simBackup.OriginalKeyExists='True'; $script:simBackup.OriginalValueExists='True'; $script:simBackup.OriginalType='DWord'; $script:simBackup.OriginalValue='0'
+$script:policy.Value='0'; $script:changeAfterBackup=$true
+Throws { Enable-Protection -FreshCycle } 'Fresh cycle refuses registry change after new Prepared record'
+Check ($script:simBackup.Phase -eq 'Prepared' -and $script:policy.Value -eq '7') 'Interrupted fresh cycle retains Prepared record for review'
+$script:policy.Value='0'
+Restore-Protection | Out-Null
+Check ($script:simBackup.Phase -eq 'Restored' -and $script:policy.Value -eq '0') 'Interrupted fresh cycle reconciles intact baseline'
 
 $script:DataDir=$tmp
 $script:packagePresent=$true

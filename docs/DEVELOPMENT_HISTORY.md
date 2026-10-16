@@ -1,5 +1,7 @@
 # DriverGuard development history
 
+- 2026-10-16 fresh recovery cycle (before commit) — **WHAT:** added explicit menu A / `-Action FreshCycle` for a valid Restored record and disabled current policy; verified secure archival precedes a new Prepared baseline, then reused Enable and Restore transitions. **WHY:** a completed absent-value VMware cycle left Restored history, and ordinary Enable legitimately refused a later manually set DWORD `0` baseline before any registry write. **TESTED:** Windows PowerShell 5.1 regression suite 132/132, exit `0`; parser errors zero in three scripts; disposable archival/atomic-rotation fixture and mocked failure/interruption cases. **REMAINING:** native archive ACLs and full cycle require isolated VMware validation. No live registry write, driver operation, or reboot on the development host.
+
 This is a concise chronology grounded in local Git commits and verified checks. See [CHANGELOG.md](../CHANGELOG.md) for release notes and [TESTING.md](../TESTING.md) for test details. Commit hashes below are historical parents of the context-system commit.
 
 ## 2026-10-16

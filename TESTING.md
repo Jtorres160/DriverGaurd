@@ -1,5 +1,11 @@
 # Testing
 
+## Fresh recovery cycle — October 16, 2026
+
+In the VMware test, a completed absent-value Enable/Restore cycle left a valid `Restored` record. After the tester manually set the value to DWORD `0`, ordinary Enable refused because that record described an absent original. This was a legitimate discovered recovery-record lifecycle limitation, **not** a failed registry-write test: the refusal occurred before confirmation and policy modification. The new explicit `FreshCycle` action archives the prior Restored record and captures the current disabled baseline. The previous VMware run did not exercise this new action.
+
+The local Windows PowerShell 5.1 suite passed 132/132, exit `0`. Mocked tests cover fresh cycles from DWORD `0` and absent, exact restoration, record-state and policy refusal, cancellation, archival and Prepared-write faults, interruption reconciliation, and policy changes during confirmation or after preparation. A disposable-file test exercises real archival and atomic rotation, verifies that the old record remains archived, and refuses replacement of a `Prepared` record; privileged ACL writes are stubbed. PowerShell 5.1 parsing found zero errors in the application and both test scripts. No live registry write, driver installation, or cleanup was performed. Windows-native FreshCycle and archive ACL behavior remain for isolated VMware validation.
+
 ## Phase 4A atomic replacement fix — October 16, 2026
 
 A user-reported live VMware run on Windows 11 Home build 26300 began with `ExcludeWUDriversInQualityUpdate` absent. Enable wrote `REG_DWORD 1`, then failed while advancing the recovery record from `Prepared` to `Active` with `[IO.File]::Replace` reporting “The path is not of a legal form.” Status subsequently reported a valid `Prepared` backup and an incomplete operation. This is a reported live observation, not a retest of the fix. The VM state has not been automatically repaired.
