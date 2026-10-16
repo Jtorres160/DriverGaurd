@@ -1,5 +1,10 @@
 # Changelog
 
+## Phase 4B missing-file validation — 2026-10-16
+
+- Recorded live VMware PASS: Restore refused a missing Active recovery file before confirmation; after the saved file was returned, normal Restore recovered the recorded DWORD `0` baseline and valid `Restored` state.
+- Malformed and unsafe-permission Restore cases remain open. Windows Update enforcement remains unverified. No application code changed.
+
 ## Phase 4 cancellation and reboot follow-up — 2026-10-16
 
 - Recorded live VMware Status passes for standard-user UAC decline, UAC approval followed by `NO` at Enable, and persistence of DWORD `0`/`Restored` after reboot.

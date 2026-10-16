@@ -1,5 +1,13 @@
 # Validation matrix
 
+## Phase 4B missing recovery file — October 16, 2026
+
+| Case | Live VMware evidence | Status and limit |
+|---|---|---|
+| Active/DWORD `1` with primary recovery file renamed | `-Action Restore` refused “No recovery backup exists. Original configuration cannot be inferred.” before confirmation; returning the saved file restored valid `Active` Status, then normal Restore independently verified DWORD `0` and ended `VALID (Restored)` | PASS for missing-file refusal and recovery workflow on Windows 11 Home build 26300; malformed/unsafe Restore refusal remains untested live. No file hashes or exit codes supplied |
+
+Windows Update enforcement remains **UNVERIFIED**. Other Phase 4 safety checks are in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md).
+
 ## Phase 4 UAC and post-Restore reboot — October 16, 2026
 
 | Case | Live VMware observation | Status and limit |
