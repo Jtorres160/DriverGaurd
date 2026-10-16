@@ -1,10 +1,14 @@
 # Testing
 
+## Phase 4B malformed Active recovery record — October 16, 2026
+
+The tester reports a live VMware Workstation Pro run on Windows 11 Home build 26300 from an Administrator Command Prompt, with a safety snapshot available. Starting at DWORD `0`/`VALID (Restored)`, Enable with `YES` reached DWORD `1`, `EXCLUSION CONFIGURED`, `VALID (Active)`, and `External change: No`. The Active record was saved as `original-state.active-malformed-test.bak`, and the primary `original-state.ini` was replaced with `INVALID_TEST_RECORD`. Restore refused **before confirmation** with “Recovery backup is malformed.” Status then showed DWORD `1`, `EXCLUSION CONFIGURED`, `CORRUPT`, and `External change: Unknown`. After the saved Active record was copied back, Status returned to DWORD `1`/`VALID (Active)` with no external change. Normal Restore identified the original DWORD `0`, reported independent verification, and final Status showed `POLICY DISABLED`, DWORD `0`, `VALID (Restored)`, and no external change. **PASS for this malformed-file Restore refusal and recovery workflow.** This is user-reported live VM evidence, separate from the local automated suite. Other malformed-record variants and unsafe-permission Restore behavior remain untested live; Windows Update enforcement remains **UNVERIFIED**.
+
 ## Phase 4B missing recovery file — October 16, 2026
 
 The tester reports a live VMware Workstation Pro run on Windows 11 Home build 26300 from an Administrator Command Prompt, with a recovery snapshot available. Enable from an original DWORD `0` baseline reached `EXCLUSION CONFIGURED`, DWORD `1`, `VALID (Active)`, and `External change: No`. The tester renamed `%ProgramData%\DriverGuard\original-state.ini` to `original-state.missing-test.bak`. `-Action Restore` refused with “No recovery backup exists. Original configuration cannot be inferred.” before any confirmation prompt. After the saved file was renamed back, Status still showed DWORD `1`, `VALID (Active)`, and no external change. Normal Restore then reported the recorded DWORD `0` baseline and independent verification; final Status showed `POLICY DISABLED`, DWORD `0`, `VALID (Restored)`, and no external change. **PASS for the tested missing-file refusal and recovery workflow.** This is reported live VM evidence, separate from the local mocked suite; no new VM run was performed for this documentation update.
 
-The missing-file result does not establish Restore behavior for a malformed or unsafe-permission record, nor Windows Update enforcement (**UNVERIFIED**). See the [current Phase 4 checklist](WINDOWS11_VALIDATION.md) for remaining safety cases.
+The missing-file result did not establish malformed-record Restore behavior; the later `INVALID_TEST_RECORD` scenario above tested one such case. Unsafe-permission Restore behavior and Windows Update enforcement remain **UNVERIFIED**. See the [current Phase 4 checklist](WINDOWS11_VALIDATION.md) for remaining safety cases.
 
 ## Latest Phase 4 VMware results — October 16, 2026
 
@@ -115,7 +119,7 @@ The read-only native diagnostic action was also run on a Windows 11 IoT Enterpri
 | A06 | Repeated Enable | First backup retained | Mock and VMware passed | PASS, live and mocked |
 | A07 | Restore absent | Delete value only | Mock and VMware readback passed | PASS, live and mocked |
 | A08 | Restore DWORD 0 | Write 0 | Mock and VMware independent `REG_DWORD 0x0` readback passed | PASS, live and mocked |
-| A09 | Missing/corrupt backup | Refuse restoration | Mock passed; VMware missing-file Restore refused before confirmation and recovered after file return; invalid-text Enable also refused | PARTIAL overall: missing-file Restore PASS; malformed/unsafe Restore not tested live |
+| A09 | Missing/corrupt backup | Refuse restoration | Mock passed; VMware missing-file Restore and `INVALID_TEST_RECORD` Restore refused before confirmation, then normal Restore succeeded after saved-file return | PARTIAL overall: tested missing and one malformed Restore case PASS; other malformed and unsafe-permission variants open |
 | A10 | Registry write denied | Report failure, no success | Mock passed | Pass, mocked |
 | A11 | External change | Refuse overwrite | Mock passed; corrected Active/DWORD `0` refusal confirmed in VMware | PASS for tested conflict; other variants mocked |
 | A12 | Invalid menu input | Return to menu | BAT inspection only | Not tested |

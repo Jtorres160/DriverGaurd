@@ -1,10 +1,18 @@
 # Validation matrix
 
+## Phase 4B malformed Active record — October 16, 2026
+
+| Case | Live VMware evidence | Status and limit |
+|---|---|---|
+| Active/DWORD `1`; primary record replaced with `INVALID_TEST_RECORD` | Restore refused “Recovery backup is malformed.” before confirmation; Status showed `CORRUPT` and external change `Unknown`. Returning the saved Active file restored valid Status, and normal Restore independently verified DWORD `0`/`Restored` | PASS for this invalid-text refusal and recovery workflow on Windows 11 Home build 26300. Other malformed-record variants and unsafe permissions remain untested live |
+
+Phase 4 remains **PARTIAL** and Windows Update enforcement **UNVERIFIED**. Remaining safety checks are in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md).
+
 ## Phase 4B missing recovery file — October 16, 2026
 
 | Case | Live VMware evidence | Status and limit |
 |---|---|---|
-| Active/DWORD `1` with primary recovery file renamed | `-Action Restore` refused “No recovery backup exists. Original configuration cannot be inferred.” before confirmation; returning the saved file restored valid `Active` Status, then normal Restore independently verified DWORD `0` and ended `VALID (Restored)` | PASS for missing-file refusal and recovery workflow on Windows 11 Home build 26300; malformed/unsafe Restore refusal remains untested live. No file hashes or exit codes supplied |
+| Active/DWORD `1` with primary recovery file renamed | `-Action Restore` refused “No recovery backup exists. Original configuration cannot be inferred.” before confirmation; returning the saved file restored valid `Active` Status, then normal Restore independently verified DWORD `0` and ended `VALID (Restored)` | PASS for missing-file refusal and recovery workflow on Windows 11 Home build 26300; later `INVALID_TEST_RECORD` Restore also passed. Other malformed/unsafe variants remain untested live. No file hashes or exit codes supplied |
 
 Windows Update enforcement remains **UNVERIFIED**. Other Phase 4 safety checks are in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md).
 

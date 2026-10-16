@@ -1,9 +1,14 @@
 # Changelog
 
+## Phase 4B malformed-file validation — 2026-10-16
+
+- Recorded live VMware PASS for Restore refusal before confirmation with an Active recovery file replaced by `INVALID_TEST_RECORD`; returning the saved Active file allowed normal Restore to DWORD `0`/valid `Restored`.
+- Other malformed-file variants and unsafe-permission Restore remain open. Phase 4 remains partial and Windows Update enforcement unverified. No application code changed.
+
 ## Phase 4B missing-file validation — 2026-10-16
 
 - Recorded live VMware PASS: Restore refused a missing Active recovery file before confirmation; after the saved file was returned, normal Restore recovered the recorded DWORD `0` baseline and valid `Restored` state.
-- Malformed and unsafe-permission Restore cases remain open. Windows Update enforcement remains unverified. No application code changed.
+- A later `INVALID_TEST_RECORD` Restore refusal passed; other malformed and unsafe-permission cases remain open. Windows Update enforcement remains unverified. No application code changed.
 
 ## Phase 4 cancellation and reboot follow-up — 2026-10-16
 
