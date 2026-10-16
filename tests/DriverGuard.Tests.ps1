@@ -1,0 +1,175 @@
+$ErrorActionPreference = 'Stop'
+$env:DRIVERGUARD_TEST_MODE = '1'
+. (Join-Path $PSScriptRoot '..\DriverGuard.ps1')
+$script:passed=0
+$script:failed=0
+function Check([bool]$Condition,[string]$Name) {
+    if ($Condition) { $script:passed++; Write-Host "PASS $Name" }
+    else { $script:failed++; Write-Host "FAIL $Name" }
+}
+function Throws([scriptblock]$Block,[string]$Name) {
+    try { & $Block; Check $false $Name } catch { Check $true $Name }
+}
+function New-Gpu([string]$Vendor,[string]$Id,[string]$Inf='oem1.inf',[string]$Version='1.0') {
+    [pscustomobject]@{ Vendor=$Vendor; InstanceId=$Id; Model="$Vendor Graphics"; HardwareIds=@($Id); Provider=$Vendor; Inf=$Inf; Version=$Version; Status='OK'; Date='2026-01-01' }
+}
+function New-Journal([string]$State='InstallerExited') {
+    [pscustomobject]@{ Schema=1; State=$State; InstanceId='PCI\VEN_10DE&DEV_1234\A'; Vendor='NVIDIA'; Model='NVIDIA Graphics'; OldInf='oem1.inf'; OldVersion='1.0'; OldProvider='NVIDIA'; ExpectedVersion='2.0'; NewInf=''; NewVersion=''; VerifiedUtc='' }
+}
+
+Check ((Get-GpuVendor 'PCI\VEN_10DE&DEV_1234\A') -eq 'NVIDIA') 'NVIDIA vendor detection'
+Check ((Get-GpuVendor 'PCI\VEN_1002&DEV_1234\A') -eq 'AMD') 'AMD vendor detection'
+Check ((Get-GpuVendor 'PCI\VEN_8086&DEV_1234\A') -eq 'Intel') 'Intel integrated vendor detection'
+Check ((Get-GpuVendor 'ROOT\DISPLAY\1') -eq $null) 'Nonphysical display excluded'
+
+$script:testEntities = @(
+    [pscustomobject]@{ PNPClass='Display'; PNPDeviceID='PCI\VEN_8086&DEV_1234\I'; Name='Intel UHD'; Status='OK' },
+    [pscustomobject]@{ PNPClass='Display'; PNPDeviceID='PCI\VEN_10DE&DEV_5678\N'; Name='NVIDIA RTX'; Status='OK' },
+    [pscustomobject]@{ PNPClass='Display'; PNPDeviceID='ROOT\DISPLAY\V'; Name='Virtual Display'; Status='OK' }
+)
+$script:testSigned = @(
+    [pscustomobject]@{ ClassGuid=$script:DisplayGuid; DeviceID='PCI\VEN_8086&DEV_1234\I'; DriverProviderName='Intel'; DriverVersion='31.0'; DriverDate='2026-01-01'; InfName='oem2.inf' },
+    [pscustomobject]@{ ClassGuid=$script:DisplayGuid; DeviceID='PCI\VEN_10DE&DEV_5678\N'; DriverProviderName='NVIDIA'; DriverVersion='32.0'; DriverDate='2026-02-01'; InfName='oem3.inf' }
+)
+function Get-CimInstance([string]$ClassName) { if ($ClassName -eq 'Win32_PnPEntity') { return $script:testEntities }; if ($ClassName -eq 'Win32_PnPSignedDriver') { return $script:testSigned } }
+function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) [pscustomobject]@{ Data=@($InstanceId) } }
+$hybrid=@(Get-Gpus)
+Check ($hybrid.Count -eq 2 -and $hybrid[0].Vendor -eq 'Intel' -and $hybrid[1].Vendor -eq 'NVIDIA') 'Hybrid graphics detection'
+Check ($hybrid[0].Inf -eq 'oem2.inf' -and $hybrid[1].Inf -eq 'oem3.inf') 'Per-device active INF mapping'
+
+$gpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A'
+$unknown=Classify-Origin $gpu @() @() @() $null
+Check ($unknown.Classification -eq 'Unknown origin') 'Missing Windows Update history yields unknown'
+$providerOnly=Classify-Origin $gpu @([pscustomobject]@{ Title='NVIDIA Display Driver'; Date=(Get-Date) }) @() @() $null
+Check ($providerOnly.Classification -eq 'Unknown origin') 'Provider/title alone cannot establish provenance'
+$setup=@([pscustomobject]@{ WindowsUpdateMarker=$false; Header='Device install'; Started=(Get-Date) })
+$history=@([pscustomobject]@{ Title='NVIDIA Graphics driver'; Date=(Get-Date) })
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Likely Windows Update installation') 'Correlated WU and SetupAPI evidence'
+$setup[0].WindowsUpdateMarker=$true
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Confirmed Windows Update installation') 'Explicit WU SetupAPI evidence'
+$setup[0].Started=(Get-Date).AddDays(-10)
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'Unknown origin') 'Unrelated timestamps remain unknown'
+
+$tmp=Join-Path $PSScriptRoot 'fixture-package'
+New-Item -ItemType Directory -Path $tmp -Force | Out-Null
+$exe=Join-Path $tmp 'setup.exe'; $inf=Join-Path $tmp 'display.inf'
+[IO.File]::WriteAllText($exe,'fixture')
+[IO.File]::WriteAllText($inf,"[Version]`nClass=Display`nDriverVer=01/01/2026,2.0`nPCI\VEN_10DE&DEV_1234")
+function Get-AuthenticodeSignature { param([string]$LiteralPath) [pscustomobject]@{ Status='Valid'; SignerCertificate=[pscustomobject]@{ Subject='CN=NVIDIA Corporation' } } }
+Throws { Test-InstallerCompatibility $gpu (Join-Path $tmp 'missing.exe') $inf } 'Invalid installer file refused'
+Check ((Test-InstallerCompatibility $gpu $exe $inf).Version -eq '2.0') 'Signed matching package accepted'
+function Get-AuthenticodeSignature { param([string]$LiteralPath) if ($LiteralPath -match '\.inf$') { return [pscustomobject]@{ Status='Valid'; SignerCertificate=[pscustomobject]@{ Subject='CN=Microsoft Windows Hardware Compatibility Publisher' } } }; [pscustomobject]@{ Status='Valid'; SignerCertificate=[pscustomobject]@{ Subject='CN=NVIDIA Corporation' } } }
+Check ((Test-InstallerCompatibility $gpu $exe $inf).Version -eq '2.0') 'Microsoft certified INF with vendor EXE accepted'
+$other=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_9999\A'
+Throws { Test-InstallerCompatibility $other $exe $inf } 'Installer and device incompatibility refused'
+function Get-AuthenticodeSignature { param([string]$LiteralPath) [pscustomobject]@{ Status='NotSigned'; SignerCertificate=$null } }
+Throws { Test-InstallerCompatibility $gpu $exe $inf } 'Unsigned installer refused'
+
+$j=New-Journal 'Verified'; $j.NewInf='oem9.inf'; $j.NewVersion='2.0'
+$new=New-Gpu 'NVIDIA' $j.InstanceId 'oem9.inf' '2.0'
+$packages=@([pscustomobject]@{ Inf='oem1.inf'; Class='Display' })
+Check ((Test-CleanupEligibility $j $new $packages @()) -eq $null) 'Safe obsolete package eligible'
+Check ((Test-CleanupEligibility $j $new @($packages+$packages) @()) -match 'uniquely') 'Multiple matching INF entries refused'
+Check ((Test-CleanupEligibility $j (New-Gpu 'NVIDIA' $j.InstanceId 'oem1.inf' '2.0') $packages @()) -ne $null) 'Active package removal refused'
+Check ((Test-CleanupEligibility $j $new $packages @([pscustomobject]@{ InfName='oem1.inf' })) -match 'another device') 'Shared package removal refused'
+Check ((Test-CleanupEligibility (New-Journal 'Failed') $new $packages @()) -match 'not been verified') 'Failed installation blocks cleanup'
+
+function Assert-Windows { [pscustomobject]@{ Name='Windows Test'; Build=22631; Version='10.0' } }
+function Request-Elevation { param([string]$RequestedAction) return $false }
+function Test-PendingRestart { return $script:pending }
+function Read-Journal { return $script:testJournal }
+function Write-Journal { param($Journal) $script:testJournal=$Journal }
+$script:logEntries=New-Object Collections.Generic.List[string]
+function Write-Log { param([string]$Operation,[string]$Result,[string]$Detail) $script:logEntries.Add("$Operation|$Result|$Detail") }
+function Get-Gpus { return @($script:currentGpu) }
+$script:pending=$false
+$script:testJournal=New-Journal 'Started'; $script:currentGpu=$new
+Throws { Verify-GpuDriver } 'Interrupted installer cannot verify'
+$script:testJournal=New-Journal 'Failed'
+Throws { Verify-GpuDriver } 'Failed installer cannot verify'
+$script:testJournal=New-Journal 'InstallerExited'; $script:pending=$true
+Verify-GpuDriver | Out-Null
+Check ($script:testJournal.State -eq 'PendingRestart' -and @($script:logEntries | Where-Object { $_ -match 'PENDING RESTART' }).Count -gt 0) 'Pending restart recorded and logged'
+$script:pending=$false
+Verify-GpuDriver | Out-Null
+Check ($script:testJournal.State -eq 'Verified' -and $script:testJournal.NewInf -eq 'oem9.inf') 'Replacement verified after reboot'
+Check (@($script:logEntries | Where-Object { $_ -match 'GPU verify\|SUCCESS.*oem9.inf' }).Count -gt 0) 'Post-reboot active INF logged'
+$script:testJournal=New-Journal 'InstallerExited'; $script:currentGpu=New-Gpu 'NVIDIA' $gpu.InstanceId 'oem1.inf' '1.0'
+Throws { Verify-GpuDriver } 'Unchanged driver fails verification'
+
+$realBackupPath=$script:BackupPath
+$script:BackupPath=Join-Path $PSScriptRoot 'test-backup.ini'
+$sample=[pscustomobject]@{ OriginalKeyExists=$true; OriginalValueExists=$true; OriginalType='DWord'; OriginalValue='0'; Phase='Active'; OS='Windows Test'; CreatedUtc='2026-01-01T00:00:00Z' }
+[IO.File]::WriteAllText($script:BackupPath,(Format-Backup $sample))
+Check ((Read-Backup).OriginalValue -eq '0') 'Recovery backup round trip'
+[IO.File]::WriteAllText($script:BackupPath,'Version=1')
+Throws { Read-Backup } 'Corrupt recovery backup refused'
+Remove-Item -LiteralPath $script:BackupPath -Force
+$script:BackupPath=$realBackupPath
+
+function Read-Policy { return $script:policy }
+function Set-PolicyValue { param([int]$Value) if ($script:denyWrite) { throw 'Access denied' }; $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value=[string]$Value } }
+function Remove-PolicyValue { $script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$false; Type=''; Value='' } }
+function Read-Backup { return $script:simBackup }
+function Protect-DataDirectory { }
+function Write-Atomic { param([string]$Path,[string]$Text) $data=@{}; foreach ($line in ($Text -split "`n")) { if ($line -match '^([^=]+)=(.*)$') { $data[$matches[1]]=$matches[2] } }; $script:simBackup=[pscustomobject]$data }
+function Confirm-Yes { param([string]$Prompt) return $true }
+$script:denyWrite=$false
+$script:simBackup=$null
+$script:policy=[pscustomobject]@{ KeyExists=$false; ValueExists=$false; Type=''; Value='' }
+Enable-Protection | Out-Null
+Check ($script:policy.Value -eq '1' -and $script:simBackup.OriginalValueExists -eq 'False') 'A03 absent policy backed up and enabled'
+Enable-Protection | Out-Null
+Check ($script:simBackup.OriginalValueExists -eq 'False') 'A06 repeat enable preserves original backup'
+Restore-Protection | Out-Null
+Check (-not $script:policy.ValueExists -and $script:simBackup.Phase -eq 'Restored') 'A07 absent value restored'
+$script:simBackup=$null
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Enable-Protection | Out-Null
+Check ($script:simBackup.OriginalValue -eq '0' -and $script:policy.Value -eq '1') 'A04 DWORD zero backed up and enabled'
+Restore-Protection | Out-Null
+Check ($script:policy.Value -eq '0') 'A08 DWORD zero restored'
+Enable-Protection | Out-Null
+Check ($script:simBackup.OriginalValue -eq '0') 'Reenable after restore preserves first backup'
+$script:simBackup=$null
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='1' }
+Enable-Protection | Out-Null
+Check ($null -eq $script:simBackup -and $script:policy.Value -eq '1') 'A05 externally enabled policy left untouched'
+Throws { Restore-Protection } 'A09 missing backup refuses restoration'
+$script:simBackup=$sample; $script:simBackup.Phase='Active'
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='7' }
+Throws { Restore-Protection } 'A11 external policy conflict refused'
+$script:simBackup=$null; $script:denyWrite=$true
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='DWord'; Value='0' }
+Throws { Enable-Protection } 'A10 denied registry write reports failure'
+Check ($script:policy.Value -eq '0') 'Denied write does not change observed policy'
+$script:denyWrite=$false
+$script:policy=[pscustomobject]@{ KeyExists=$true; ValueExists=$true; Type='String'; Value='1' }
+Throws { Enable-Protection } 'Invalid policy type refused'
+
+$script:DataDir=$tmp
+$script:packagePresent=$true
+$script:pnputilCalls=New-Object Collections.Generic.List[string]
+function Get-DriverPackages { if ($script:packagePresent) { [pscustomobject]@{ Inf='oem1.inf'; Class='Display'; Provider='NVIDIA' } } }
+function pnputil.exe {
+    $script:pnputilCalls.Add(($args -join ' '))
+    if ($args[0] -eq '/export-driver') { [IO.File]::WriteAllText((Join-Path $args[2] 'saved.inf'),'fixture') }
+    if ($args[0] -eq '/delete-driver') { $script:packagePresent=$false }
+    $global:LASTEXITCODE=0
+}
+$script:testJournal=$j; $script:currentGpu=$new; $script:pending=$false
+Cleanup-GpuDriver | Out-Null
+Check (-not $script:packagePresent -and @($script:pnputilCalls | Where-Object { $_ -eq '/delete-driver oem1.inf' }).Count -eq 1) 'Targeted cleanup uses no force or uninstall flags'
+
+$script:packagePresent=$true
+$script:currentGpu=$gpu
+function Select-Gpu { return $script:currentGpu }
+function Read-Host { param([string]$Prompt) if ($Prompt -match 'INF') { return $inf }; return $exe }
+function Test-InstallerCompatibility { param($Gpu,[string]$Installer,[string]$InfPath) [pscustomobject]@{ Installer=$exe; InfPath=$inf; Version='2.0'; InstallerHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash; InfHash=(Get-FileHash -LiteralPath $inf -Algorithm SHA256).Hash; Signer='NVIDIA' } }
+function Start-Process { param([string]$FilePath,[switch]$Wait,[switch]$PassThru) [pscustomobject]@{ ExitCode=5 } }
+Throws { Install-GpuDriver } 'Failed manufacturer installer exit reported'
+Check ($script:testJournal.State -eq 'Failed' -and @($script:logEntries | Where-Object { $_ -match 'GPU install\|FAILED' }).Count -gt 0) 'Failed install journal and log recorded'
+
+Remove-Item -LiteralPath $tmp -Recurse -Force
+Write-Host "RESULT: $script:passed passed; $script:failed failed"
+if ($script:failed -gt 0) { exit 1 }
