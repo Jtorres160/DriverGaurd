@@ -1,9 +1,14 @@
 # Changelog
 
+## Phase 4 VMware validation record — 2026-10-16
+
+- Recorded live Windows 11 Home build 26300 VMware passes for absent-value Enable/Restore, repeated Enable, enabled-state reboot persistence, real `Prepared` interruption recovery, FreshCycle to a DWORD `0` baseline and targeted archive checks, Enable cancellation, corrected Active conflict refusal, and invalid-text backup detection with Enable refusal and recovery-file replacement from a saved copy.
+- Phase 4A/4B remain partial for UAC, other fault paths, and post-Restore reboot. Windows Update enforcement remains unverified; the final registry read/write interval is not atomic. No application code changed in this documentation update.
+
 ## Active Restore conflict correction — 2026-10-16
 
 - Fixed Restore so an `Active` record requires the current policy to match DriverGuard's recorded DWORD `1` before confirmation; an external change to the original DWORD `0` now refuses. The post-confirmation policy read is retained and checked before writing.
-- Preserved Prepared reconciliation and exact DWORD `0` or absent baseline restoration. Added mocked conflict and no-change regression cases; corrected behavior awaits VMware validation.
+- Preserved Prepared reconciliation and exact DWORD `0` or absent baseline restoration. Added mocked conflict and no-change regression cases. The corrected DWORD `0` conflict refusal subsequently passed in VMware; other conflict variants remain untested live.
 
 ## Fresh recovery cycle — 2026-10-16
 
@@ -13,7 +18,7 @@
 ## Phase 4A recovery-file correction — 2026-10-16
 
 - Fixed Windows PowerShell 5.1 atomic replacement of an existing recovery file by providing a real rollback path. The prior `Prepared` state is retained if replacement verification fails.
-- Added real-filesystem replacement and failure regression coverage. The fix passed local tests and still requires a live VMware retest; Phase 4 remains partial.
+- Added real-filesystem replacement and failure regression coverage. Later VMware tests recovered the actual `Prepared` interruption and completed normal cycles; Phase 4 remains partial for other paths.
 
 ## Phase 5B/6B validation and hardening — 2026-10-15
 

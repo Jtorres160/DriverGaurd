@@ -1,13 +1,15 @@
-# Phase 5/6 validation matrix
+# Validation matrix
 
 ## Restore policy conflict case — October 16, 2026
 
 | Case | Evidence | Result | Remaining validation |
 |---|---|---|---|
-| Active record; external DWORD `1` to original DWORD `0` | Real Windows 11 VMware: Enable wrote `1`, recovery was valid `Active`, Status reported an external change after manual DWORD `0` edit | Old Restore reached confirmation; tester entered `NO`, so no unsafe Restore write was observed | Corrected pre-confirmation refusal and unchanged recovery file require a new VMware run |
-| Active conflicts, normal restore, and Prepared recovery | 141/141 local PowerShell 5.1 regression checks, including mocked registry and disposable file behavior | Corrected guard, recheck, exact baselines, and reconciliation pass locally | Native conflict, race, and recovery outcomes remain unverified |
+| Active record; external DWORD `1` to original DWORD `0` | Real Windows 11 Home build 26300 VMware: Enable wrote `1`, recovery was valid `Active`, Status flagged the manual DWORD `0` change | Old Restore prompted and tester answered `NO`; after commit `b75aa77`, corrected Restore refused before confirmation, leaving DWORD `0` and `Active`. Manual return to `1` allowed normal Restore to DWORD `0`/`Restored` | PASS for this conflict; removed/unsupported values and final read/write race NOT TESTED live. No byte-for-byte recovery-file hash supplied |
+| Normal cycles, FreshCycle, reboot, Prepared recovery, and damaged file | User-reported VMware runs with snapshots; separate local 141/141 PowerShell 5.1 regression checks | PASS for absent and DWORD `0` target restoration, enabled-state reboot persistence, real after-write `Prepared` recovery, tested archive checks, and invalid-text backup detection/Enable refusal | PARTIAL for post-Restore reboot, UAC, other interruption/fault and damaged-backup variants; registry readback does not verify Windows Update enforcement |
 
 The VMware discovery is a policy workflow observation and does not add a GPU provenance ground-truth case to the matrix below.
+
+## Phase 5/6 GPU provenance
 
 Updated October 15, 2026. The counts below refer to **one physical GPU**, not independent installations: one real device with verified current identity, zero real installations with independently known origin, one real installation observed without an origin label, and 97 passing mocked assertions. The assertions are neither 97 physical devices nor an accuracy sample.
 
