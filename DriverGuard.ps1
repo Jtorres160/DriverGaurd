@@ -337,31 +337,41 @@ function Get-UpdateHistory([switch]$Strict) {
         })
     } catch { if ($Strict) { throw }; Write-Warning "Windows Update history unavailable: $($_.Exception.Message)"; return @() }
 }
+function ConvertFrom-SetupEvidence($Lines,[string]$InstanceId,[string]$Inf) {
+    $hits = New-Object Collections.Generic.List[object]
+    $section = New-Object Collections.Generic.List[string]
+    $inSection = $false
+    foreach ($line in $Lines) {
+        if ($line -match '^>>>  \[') { $section.Clear(); $inSection=$true }
+        if ($inSection) { $section.Add($line) }
+        if ($inSection -and $line -match '^<<<  Section end') {
+            $header = $section[0]
+            $headerMatch = [regex]::Match($header,'^>>>  \[Device Install \(([^]]+)\) - (.+)\]$',[Text.RegularExpressions.RegexOptions]::IgnoreCase)
+            if ($headerMatch.Success -and $headerMatch.Groups[2].Value -ieq $InstanceId) {
+                $joined = $section -join "`n"
+                if ($joined -match "(?i)(?<![a-z0-9_.])$([regex]::Escape($Inf))(?![a-z0-9_.])") {
+                    $wu = $headerMatch.Groups[1].Value -match '(?i)^Install Windows Update driver$'
+                    $dateMatch = [regex]::Match($joined,'(?im)^>>>  Section start (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2}(?:\.\d{1,7})?)$')
+                    $started = [datetime]::MinValue
+                    if ($dateMatch.Success) {
+                        $format = 'yyyy/MM/dd HH:mm:ss'
+                        if ($dateMatch.Groups[1].Value.Contains('.')) { $format += '.' + ('f' * ($dateMatch.Groups[1].Value.Length - $dateMatch.Groups[1].Value.LastIndexOf('.') - 1)) }
+                        [datetime]::TryParseExact($dateMatch.Groups[1].Value,$format,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$started) | Out-Null
+                    }
+                    $hits.Add([pscustomobject]@{ InstanceId=$InstanceId; Inf=$Inf; WindowsUpdateMarker=$wu; Header=$header; End=$line; Started=$started })
+                }
+            }
+            $inSection=$false
+        }
+    }
+    return @($hits | Select-Object -Last 5)
+}
 function Get-SetupEvidence([string]$InstanceId,[string]$Inf,[switch]$Strict) {
     if (-not $InstanceId -or $Inf -notmatch '^oem\d+\.inf$') { return @() }
     $path = Join-Path $env:windir 'INF\setupapi.dev.log'
     if (-not (Test-Path -LiteralPath $path)) { if ($Strict) { throw 'SetupAPI.dev.log is missing.' }; return @() }
-    try {
-        $hits = New-Object Collections.Generic.List[object]
-        $section = New-Object Collections.Generic.List[string]
-        $inSection = $false
-        foreach ($line in [IO.File]::ReadLines($path)) {
-            if ($line -match '^>>>  \[') { $section.Clear(); $inSection=$true }
-            if ($inSection) { $section.Add($line) }
-            if ($line -match '^<<<  Section end') {
-                $joined = $section -join "`n"
-                if ($section.Count -gt 0 -and $section[0].IndexOf($InstanceId,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $joined -match "(?i)(?<![a-z0-9_.])$([regex]::Escape($Inf))(?![a-z0-9_.])") {
-                    $wu = $joined -match '(?im)^.*(?:Windows Update|UpdateAgent|WUDriver).*$'
-                    $dateMatch = [regex]::Match($joined,'(?im)^>>>  Section start (\d{4}/\d{2}/\d{2} \d{2}:\d{2}:\d{2})')
-                    $started = [datetime]::MinValue
-                    if ($dateMatch.Success) { [datetime]::TryParseExact($dateMatch.Groups[1].Value,'yyyy/MM/dd HH:mm:ss',[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$started) | Out-Null }
-                    $hits.Add([pscustomobject]@{ InstanceId=$InstanceId; Inf=$Inf; WindowsUpdateMarker=$wu; Header=$section[0]; End=$line; Started=$started })
-                }
-                $inSection=$false
-            }
-        }
-        return @($hits | Select-Object -Last 5)
-    } catch { if ($Strict) { throw }; Write-Warning "SetupAPI log unavailable: $($_.Exception.Message)"; return @() }
+    try { return @(ConvertFrom-SetupEvidence ([IO.File]::ReadLines($path)) $InstanceId $Inf) }
+    catch { if ($Strict) { throw }; Write-Warning "SetupAPI log unavailable: $($_.Exception.Message)"; return @() }
 }
 function Get-EventEvidence([string]$InstanceId,[switch]$Strict) {
     try {
@@ -377,6 +387,7 @@ function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
     }
     $bound = @($setup | Where-Object { $_.InstanceId -ieq $gpu.InstanceId -and $_.Inf -ieq $gpu.Inf -and $_.Started -is [datetime] -and $_.Started -ne [datetime]::MinValue } | Sort-Object Started)
     $latest = if ($bound.Count -gt 0) { $bound[-1] } else { $null }
+    if (-not $latest) { $evidence.Add('No dated SetupAPI install section matches this device and active INF.') }
     $matchingTitles = @($updates | Where-Object {
         $_.Title -match '(?i)driver|display|graphics' -and $gpu.Model -and
         $_.Title.IndexOf($gpu.Model,[StringComparison]::OrdinalIgnoreCase) -ge 0 -and $_.Date -is [datetime]
@@ -386,10 +397,18 @@ function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
         $wu = @($matchingTitles | Where-Object { [Math]::Abs(($latest.Started - $_.Date).TotalHours) -le 48 })
         $evidence.Add("Matching device and active INF in SetupAPI: $($latest.Header) [$($latest.Started)]")
     }
+    if ($wu.Count -eq 0) { $evidence.Add('No nearby matching Windows Update history item.') }
     if ($wu.Count -gt 0) { $evidence.Add("Nearby Windows Update history title: $($wu[0].Title) [$($wu[0].Date)]") }
     if (@($events).Count -gt 0) { $evidence.Add("Device Setup event: $($events[0].Id) [$($events[0].TimeCreated)]") }
     $journalMatch = $journal -and $journal.State -eq 'Verified' -and $journal.InstanceId -ieq $gpu.InstanceId -and $journal.NewInf -ieq $gpu.Inf -and $journal.NewVersion -eq $gpu.Version
     if ($journalMatch) { $evidence.Add('DriverGuard journal records a verified manufacturer installer and running driver; installer causation is unverified.') }
+    if ($latest) {
+        $latestRecords = @($bound | Where-Object { $_.Started -eq $latest.Started })
+        if ($latestRecords.Count -gt 1 -and @($latestRecords | Where-Object WindowsUpdateMarker).Count -gt 0 -and @($latestRecords | Where-Object { -not $_.WindowsUpdateMarker }).Count -gt 0) {
+            $evidence.Add('Latest matching SetupAPI sections have contradictory mechanisms at the same timestamp.')
+            return [pscustomobject]@{ Classification='CONFLICTING_EVIDENCE'; Evidence=$evidence.ToArray() }
+        }
+    }
     if ($latest -and $latest.WindowsUpdateMarker -and $journalMatch) {
         return [pscustomobject]@{ Classification='CONFLICTING_EVIDENCE'; Evidence=$evidence.ToArray() }
     }
@@ -493,15 +512,18 @@ function Show-ReadOnlyDiagnostics {
             Write-Host "  Driver store association: $(if ($associated.Count -eq 1) {"UNIQUE | original=$($associated[0].OriginalInf)"} elseif ($associated.Count -eq 0) {'NO MATCH'} else {'AMBIGUOUS'})"
         }
         $setup=@(); $events=@(); $setupAvailable=$false
-        try { $setup=@(Get-SetupEvidence $gpu.InstanceId $gpu.Inf -Strict); $setupAvailable=$true; Write-Host "  SetupAPI: $($setup.Count) matching section(s)" }
-        catch { Write-Host "  SetupAPI: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add("SetupAPI evidence unavailable for $($gpu.InstanceId)") }
+        if ($gpu.Inf -notmatch '^oem\d+\.inf$') {
+            Write-Host '  SetupAPI: UNAVAILABLE - active device INF is unverified'
+            $limitations.Add("Active INF unavailable for $($gpu.InstanceId)")
+        } else {
+            try { $setup=@(Get-SetupEvidence $gpu.InstanceId $gpu.Inf -Strict); $setupAvailable=$true; Write-Host "  SetupAPI: $(if ($setup.Count) {"$($setup.Count) matching section(s)"} else {'NOT FOUND (0 matching sections in available log)'})" }
+            catch { Write-Host "  SetupAPI: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add("SetupAPI evidence unavailable for $($gpu.InstanceId)") }
+        }
         try { $events=@(Get-EventEvidence $gpu.InstanceId -Strict); Write-Host "  Device Setup events: $($events.Count) matching event(s)" }
         catch { Write-Host "  Device Setup events: UNAVAILABLE - $($_.Exception.Message)"; $limitations.Add("Device Setup events unavailable for $($gpu.InstanceId)") }
-        if ($updatesAvailable -and $setupAvailable) {
-            $origin=Classify-Origin $gpu $updates $setup $events $journal
-            Write-Host "  Provenance: $($origin.Classification)"
-            foreach ($item in $origin.Evidence) { Write-Host "    $item" }
-        } else { Write-Host '  Provenance: INDETERMINATE (required evidence source unavailable)' }
+        $origin=Classify-Origin $gpu $updates $setup $events $journal
+        Write-Host "  Provenance: $($origin.Classification)$(if (-not $updatesAvailable -or -not $setupAvailable) {' (PARTIAL SOURCES)'})"
+        foreach ($item in $origin.Evidence) { Write-Host "    $item" }
     }
     foreach ($reason in $failures) { Write-Host "Failed source: $reason" }
     foreach ($reason in $limitations) { Write-Host "Partial source: $reason" }

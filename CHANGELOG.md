@@ -1,5 +1,11 @@
 # Changelog
 
+## Phase 5B/6B validation and hardening — 2026-10-15
+
+- Restricted SetupAPI correlation to exact device-install sections and active INF, preserved fractional chronology, and refused incidental Windows Update mentions or staged imports as direct installation evidence.
+- Reported contradictory same-time install records and explained missing matching evidence in read-only diagnostics.
+- Passed 97 mocked checks; native standard-user validation kept the RTX 4080 SUPER provenance `UNKNOWN` and the structured driver-store inventory partial. No system changes occurred.
+
 ## Phase 5/6 read-only development — 2026-10-15
 
 - Preserved unknown GPU hardware IDs and conflicting active INF evidence instead of guessing; deduplicated device identities.

@@ -66,6 +66,7 @@ $setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpd
 $conflictJournal=New-Journal 'Verified'; $conflictJournal.NewInf=$gpu.Inf; $conflictJournal.NewVersion=$gpu.Version
 Check ((Classify-Origin $gpu $history $setup @() $conflictJournal).Classification -eq 'CONFLICTING_EVIDENCE') 'Conflicting journal and SetupAPI evidence is explicit'
 Check ((Classify-Origin $gpu @() @() @() $conflictJournal).Classification -eq 'PROBABLE_MANUFACTURER') 'Verified installer journal remains probable without independent causation'
+Check ((Classify-Origin $gpu @() @() @() $conflictJournal).Classification -ne 'MANUFACTURER_INSTALLER_CONFIRMED') 'Claimed manufacturer installer lacks independent confirmation'
 foreach ($vendorGpu in @((New-Gpu 'AMD' 'PCI\VEN_1002&DEV_1234\A' 'oem4.inf'),(New-Gpu 'Intel' 'PCI\VEN_8086&DEV_1234\A' 'oem5.inf'))) {
     $vendorHistory=@([pscustomobject]@{ Title="$($vendorGpu.Model) display driver"; Date=(Get-Date) })
     $vendorSetup=@([pscustomobject]@{ InstanceId=$vendorGpu.InstanceId; Inf=$vendorGpu.Inf; WindowsUpdateMarker=$true; Header='device install'; Started=(Get-Date) })
@@ -75,6 +76,29 @@ $stagedGpu=New-Gpu 'NVIDIA' $gpu.InstanceId 'oem77.inf'
 Check ((Classify-Origin $stagedGpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Matching staged INF cannot establish active-driver provenance'
 $wrongVersionJournal=New-Journal 'Verified'; $wrongVersionJournal.NewInf=$gpu.Inf; $wrongVersionJournal.NewVersion='older'
 Check ((Classify-Origin $gpu @() @() @() $wrongVersionJournal).Classification -eq 'UNKNOWN') 'Verified journal for another version cannot establish current origin'
+$logLines=@(
+    ">>>  [Device Install (Install Windows Update driver) - $($gpu.InstanceId)]",
+    '>>>  Section start 2026/10/15 18:05:47.534',
+    '     dvi: Selected Driver: oem1.inf',
+    '<<<  Section end 2026/10/15 18:05:48.000'
+)
+$parsed=@(ConvertFrom-SetupEvidence $logLines $gpu.InstanceId $gpu.Inf)
+Check ($parsed.Count -eq 1 -and $parsed[0].WindowsUpdateMarker -and $parsed[0].Started.Year -eq 2026 -and $parsed[0].Started.Millisecond -eq 534) 'Fractional SetupAPI timestamp and explicit update mechanism parsed'
+Check (@(ConvertFrom-SetupEvidence $logLines $gpu.InstanceId 'oem9.inf').Count -eq 0) 'Active INF mismatch rejects SetupAPI section'
+Check (@(ConvertFrom-SetupEvidence $logLines 'PCI\VEN_10DE&DEV_1234\B' $gpu.Inf).Count -eq 0) 'Exact device mismatch rejects SetupAPI section'
+$stagedLines=@('>>>  [Setup Import Driver Package - C:\Temp\oem1.inf]','>>>  Section start 2026/10/15 18:05:47.534',"     dvi: $($gpu.InstanceId)",'<<<  Section end 2026/10/15 18:05:48.000')
+Check (@(ConvertFrom-SetupEvidence $stagedLines $gpu.InstanceId $gpu.Inf).Count -eq 0) 'Staged package import is not device installation evidence'
+$incidentalLines=@(">>>  [Device Install (Hardware initiated) - $($gpu.InstanceId)]",'>>>  Section start 2026/10/15 18:05:47.534','     dvi: Selected Driver: oem1.inf','     dvi: Windows Update search skipped','<<<  Section end 2026/10/15 18:05:48.000')
+Check (-not @(ConvertFrom-SetupEvidence $incidentalLines $gpu.InstanceId $gpu.Inf)[0].WindowsUpdateMarker) 'Incidental Windows Update text does not establish mechanism'
+$manualLines=@(">>>  [Device Install (UpdateDriverForPlugAndPlayDevices) - $($gpu.InstanceId)]",'>>>  Section start 2026/10/15 18:05:47.534','     dvi: Selected Driver: oem1.inf','<<<  Section end 2026/10/15 18:05:48.000')
+Check (-not @(ConvertFrom-SetupEvidence $manualLines $gpu.InstanceId $gpu.Inf)[0].WindowsUpdateMarker) 'Manual device update is not marked as Windows Update'
+$manualEvidence=@(ConvertFrom-SetupEvidence $manualLines $gpu.InstanceId $gpu.Inf)
+Check ((Classify-Origin $gpu @() $manualEvidence @() $null).Classification -eq 'UNKNOWN') 'Manual device installation without source proof remains unknown'
+$reinstallEvidence=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$true; Header='earlier WU'; Started=(Get-Date).AddDays(-2) },[pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='same-version reinstall'; Started=(Get-Date) })
+Check ((Classify-Origin $gpu @() $reinstallEvidence @() $null).Classification -eq 'UNKNOWN') 'Same-version reinstall supersedes earlier WU mechanism'
+$sameTime=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$true; Header='WU'; Started=(Get-Date) },[pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='manual'; Started=(Get-Date) })
+$sameTime[1].Started=$sameTime[0].Started
+Check ((Classify-Origin $gpu $history $sameTime @() $null).Classification -eq 'CONFLICTING_EVIDENCE') 'Same-time contradictory install sections remain conflicting'
 
 $tmp=Join-Path $PSScriptRoot 'fixture-package'
 New-Item -ItemType Directory -Path $tmp -Force | Out-Null
@@ -262,6 +286,10 @@ $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
 Check ($report -match 'Policy:' -and $report -match 'GPU:' -and $report -match 'Driver store association:' -and $report -match 'Provenance:') 'Read-only diagnostics report required sources'
 Check ($report -match 'Diagnose result: COMPLETE \(exit 0\)' -and $report -match '(?m)^0\s*$') 'Complete diagnostics return exit code zero'
 Check ($script:logEntries.Count -eq $beforeLogs) 'Read-only diagnostics writes no activity log'
+$script:currentGpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A' ''
+$report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'SetupAPI: UNAVAILABLE - active device INF is unverified' -and $report -match 'Diagnose result: PARTIAL \(exit 2\)') 'Unverified active INF does not masquerade as missing SetupAPI record'
+$script:currentGpu=$new
 function Get-DriverPackages { throw 'Elevated inventory required' }
 function pnputil.exe { $global:LASTEXITCODE=0; return 'Published Name: oem1.inf' }
 $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
