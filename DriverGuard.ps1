@@ -453,7 +453,10 @@ function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
         $evidence.Add("Matching device and active INF in SetupAPI: $($latest.Header) [$($latest.Started)]")
     }
     if ($wu.Count -eq 0) { $evidence.Add('No nearby matching Windows Update history item.') }
-    if ($wu.Count -gt 0) { $evidence.Add("Nearby Windows Update history title: $($wu[0].Title) [$($wu[0].Date)]") }
+    if ($wu.Count -gt 0) {
+        $evidence.Add("Nearby Windows Update history title: $($wu[0].Title) [$($wu[0].Date)]")
+        if ($latest -and -not $latest.WindowsUpdateMarker) { $evidence.Add('A matching Windows Update title does not identify the mechanism for the latest device and active INF installation.') }
+    }
     if (@($events).Count -gt 0) { $evidence.Add("Device Setup event: $($events[0].Id) [$($events[0].TimeCreated)]") }
     $journalMatch = $journal -and $journal.State -eq 'Verified' -and $journal.InstanceId -ieq $gpu.InstanceId -and $journal.NewInf -ieq $gpu.Inf -and $journal.NewVersion -eq $gpu.Version
     if ($journalMatch) { $evidence.Add('DriverGuard journal records a verified manufacturer installer and running driver; installer causation is unverified.') }
@@ -474,7 +477,6 @@ function Classify-Origin($gpu,$updates,$setup,$events,$journal) {
         return [pscustomobject]@{ Classification='PROBABLE_WINDOWS_UPDATE'; Evidence=$evidence.ToArray() }
     }
     if ($journalMatch) { return [pscustomobject]@{ Classification='PROBABLE_MANUFACTURER'; Evidence=$evidence.ToArray() } }
-    if ($wu.Count -gt 0) { return [pscustomobject]@{ Classification='PROBABLE_WINDOWS_UPDATE'; Evidence=$evidence.ToArray() } }
     return [pscustomobject]@{ Classification='UNKNOWN'; Evidence=$evidence.ToArray() }
 }
 function Read-Journal {

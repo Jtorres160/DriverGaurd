@@ -75,13 +75,15 @@ $providerOnly=Classify-Origin $gpu @([pscustomobject]@{ Title='NVIDIA Display Dr
 Check ($providerOnly.Classification -eq 'UNKNOWN') 'Provider/title alone cannot establish provenance'
 $setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='Device install'; Started=(Get-Date) })
 $history=@([pscustomobject]@{ Title='NVIDIA Graphics driver'; Date=(Get-Date) })
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Correlated WU and SetupAPI evidence remains probable'
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Matching WU title does not establish an unmarked active installation mechanism'
+$unmarkedWithTitle=Classify-Origin $gpu $history $setup @() $null
+Check (@($unmarkedWithTitle.Evidence | Where-Object { $_ -match 'does not identify the mechanism' }).Count -eq 1) 'Unknown result explains the limit of nearby WU title evidence'
 $setup[0].WindowsUpdateMarker=$true
 Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'WINDOWS_UPDATE_CONFIRMED') 'Explicit WU SetupAPI evidence'
 $setup[0].Started=(Get-Date).AddDays(-10)
 Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Exact SetupAPI WU marker without nearby history remains probable'
 $setup=@([pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$true; Header='old install'; Started=(Get-Date).AddDays(-10) },[pscustomobject]@{ InstanceId=$gpu.InstanceId; Inf=$gpu.Inf; WindowsUpdateMarker=$false; Header='new install'; Started=(Get-Date) })
-Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'PROBABLE_WINDOWS_UPDATE') 'Old WU marker cannot confirm newer installation'
+Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Newer unmarked active installation supersedes old WU marker despite matching history title'
 $setup=@([pscustomobject]@{ InstanceId='PCI\VEN_1002&DEV_1234\B'; Inf='oem8.inf'; WindowsUpdateMarker=$true; Header='other GPU'; Started=(Get-Date) })
 Check ((Classify-Origin $gpu $history $setup @() $null).Classification -eq 'UNKNOWN') 'Other GPU SetupAPI evidence cannot establish origin'
 Check ((Classify-Origin (New-Gpu 'NVIDIA' $gpu.InstanceId '') $history $setup @() $null).Classification -eq 'UNKNOWN') 'Missing active INF blocks provenance inference'
