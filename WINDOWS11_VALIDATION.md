@@ -1,5 +1,9 @@
 # Windows 11 validation checklist
 
+## HEAD 714966a review — October 17, 2026
+
+At clean `714966a9b1b81de25d7f6910004f56486f7030d9`, PowerShell 5.1 parsed all three scripts with zero errors, exit `0`. Initial sandbox ReadOnly harness and native Diagnose exited `1` for denied Windows identity/GPU queries; embedded suite passed 172/172 and monitored policy/state remained unchanged. Approved outside-sandbox rerun of the affected harness exited `0`, embedded suite 172/172, native Diagnose `0`, monitored policy/state unchanged. This VM reports Windows 11 Home build 26300, VMware20,1, administrator token, DWORD `1`/Active (original DWORD `0`), no install journal, zero supported PCI Display GPUs, one third-party Display package, and 21 successful update-history items. COMPLETE describes readable applicable diagnostic sources, not GPU compatibility or policy enforcement. No state-changing native action was run. See [actual native output and invocation correction](docs/HEAD_714966a_READONLY.md) and [ordered remaining cases with a prepared first-case runbook](docs/PHASE4_NEXT_CASE.md). Current Phase 4 release gaps below remain open; no NVIDIA driver is to be installed in this VM.
+
 ## Phase 4B unsafe Active backup ACL — October 16, 2026
 
 **PASS for the tested native VMware file-specific unsafe-write ACL refusal.** Read-only inspection of exported evidence at tested HEAD `83f2543232c7da4f0fbe96dd8bf77d7f66565224` confirms Restore exit `1`, refusal naming the primary recovery file, identical five registry exports (DWORD `1`), identical 200-byte recovery captures/hash (Active, original DWORD `0`), restored original file descriptor, and unchanged directory descriptor. The injected Builtin Users write ACE remained through the refused Restore. Result, cleanup, and termination artifacts report success and confirmed child termination without critical manual intervention. Stderr contains only its BOM; stdout also reports activity-log refusal at the unsafe file.
