@@ -386,20 +386,59 @@ $script:policy.Value='0'
 Restore-Protection | Out-Null
 Check ($script:simBackup.Phase -eq 'Restored' -and $script:policy.Value -eq '0') 'Interrupted fresh cycle reconciles intact baseline'
 
-$script:DataDir=$tmp
+$savedWindir=$env:windir
+$env:windir=Join-Path $tmp 'test-windows'
+$testInfDir=Join-Path $env:windir 'INF'
+[IO.Directory]::CreateDirectory($testInfDir) | Out-Null
+$sourceInf=Join-Path $testInfDir 'oem1.inf'
+$oldInfText="[Version]`r`nClass=Display`r`nCatalogFile=nv_fixture.cat`r`n[Manufacturer]`r`nNVIDIA=Models"
+[IO.File]::WriteAllText($sourceInf,$oldInfText)
 $script:packagePresent=$true
 $script:pnputilCalls=New-Object Collections.Generic.List[string]
+$script:exportMode='valid'
+function Get-AuthenticodeSignature { param([string]$LiteralPath) [pscustomobject]@{ Status=$(if ($script:exportMode -eq 'bad-signature') { 'NotTrusted' } else { 'Valid' }) } }
 function Get-DriverPackages { if ($script:packagePresent) { [pscustomobject]@{ Inf='oem1.inf'; OriginalInf='nv_fixture.inf'; Class='Display'; Provider='NVIDIA' } } }
 function Get-DeviceUsageInventory { return @() }
 function pnputil.exe {
     $script:pnputilCalls.Add(($args -join ' '))
-    if ($args[0] -eq '/export-driver') { [IO.File]::WriteAllText((Join-Path $args[2] 'saved.inf'),'fixture') }
+    if ($args[0] -eq '/export-driver') {
+        if ($script:exportMode -eq 'unrelated') { [IO.File]::WriteAllText((Join-Path $args[2] 'unrelated.txt'),'not a package') }
+        else {
+            $exportInf=Join-Path $args[2] 'nv_fixture.inf'
+            [IO.File]::WriteAllText($exportInf,$(if ($script:exportMode -eq 'wrong-class') { $oldInfText.Replace('Class=Display','Class=Net') } else { $oldInfText }))
+            if ($script:exportMode -eq 'mismatch') { [IO.File]::AppendAllText($exportInf,'; altered') }
+            if ($script:exportMode -ne 'missing-catalog') { [IO.File]::WriteAllText((Join-Path $args[2] 'nv_fixture.cat'),$(if ($script:exportMode -eq 'empty-catalog') { '' } else { 'catalog fixture' })) }
+        }
+    }
     if ($args[0] -eq '/delete-driver') { $script:packagePresent=$false }
     $global:LASTEXITCODE=0
 }
 $script:testJournal=$j; $script:currentGpu=$new; $script:pending=$false
+$exportReasons=@{
+    unrelated='does not uniquely match'; mismatch='does not uniquely match'
+    'missing-catalog'='catalog is missing'; 'empty-catalog'='empty package files'
+    'missing-source'='installed INF is unavailable'; 'wrong-class'='not a Display package'
+    'bad-signature'='signature is not valid'
+}
+foreach ($mode in @('unrelated','mismatch','missing-catalog','empty-catalog','missing-source','wrong-class','bad-signature')) {
+    $script:DataDir=Join-Path $tmp "cleanup-$mode"
+    [IO.Directory]::CreateDirectory($script:DataDir) | Out-Null
+    $script:exportMode=$mode
+    if ($mode -eq 'missing-source') { [IO.File]::Delete($sourceInf) }
+    if ($mode -eq 'wrong-class') { [IO.File]::WriteAllText($sourceInf,$oldInfText.Replace('Class=Display','Class=Net')) }
+    $beforeDeletes=@($script:pnputilCalls | Where-Object { $_ -like '/delete-driver*' }).Count
+    $refusal=''
+    try { Cleanup-GpuDriver | Out-Null } catch { $refusal=$_.Exception.Message }
+    Check ($refusal -like "*$($exportReasons[$mode])*") "Cleanup refuses $mode export for expected reason"
+    Check ($script:packagePresent -and @($script:pnputilCalls | Where-Object { $_ -like '/delete-driver*' }).Count -eq $beforeDeletes) "No deletion after $mode export"
+    [IO.File]::WriteAllText($sourceInf,$oldInfText)
+}
+$script:DataDir=Join-Path $tmp 'cleanup-valid'
+[IO.Directory]::CreateDirectory($script:DataDir) | Out-Null
+$script:exportMode='valid'
 Cleanup-GpuDriver | Out-Null
-Check (-not $script:packagePresent -and @($script:pnputilCalls | Where-Object { $_ -eq '/delete-driver oem1.inf' }).Count -eq 1) 'Targeted cleanup uses no force or uninstall flags'
+Check (-not $script:packagePresent -and @($script:pnputilCalls | Where-Object { $_ -eq '/delete-driver oem1.inf' }).Count -eq 1) 'Verified export permits targeted cleanup without force or uninstall flags'
+$env:windir=$savedWindir
 
 $script:packagePresent=$true
 $script:currentGpu=$gpu

@@ -163,13 +163,14 @@ Additional mocked checks passed for invalid registry type, reenable after verifi
 | Interrupted installation | No success claim | Mock passed | Pass, mocked |
 | Pending restart | Defer verification and cleanup | Mock passed | Pass, mocked |
 | Manufacturer replacement | New INF/version running | Post-restart verification mock passed | Pass, mocked |
-| Safe obsolete cleanup | Eligible only when unique and unused | Eligibility and targeted non-forced command mock passed | Pass, mocked |
+| Safe obsolete cleanup | Eligible only when unique and unused; export tied to old installed INF before deletion | Eligibility, valid export, and targeted non-forced command mock passed | Pass, mocked |
+| Invalid cleanup export | Refuse before deletion | Unrelated nonempty file, INF hash mismatch, missing/empty/invalidly signed catalog, missing installed INF, and wrong class mocked | Pass, mocked |
 | Active/shared driver refusal | Refused | Mock passed | Pass, mocked |
 | Hidden/disconnected device usage | Refused | Mock passed | Pass, mocked |
 | Unreadable device usage | Refused | Mock passed | Pass, mocked |
 | Detection and logging after reboot | Correct active INF logged | Mock passed | Pass, mocked |
 
-No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, vendor installer behavior, package catalog behavior, or live PnPUtil deletion. These require snapshots and explicit approval in an isolated Windows 10/11 VM with suitable GPUs or pass-through devices.
+No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, vendor installer behavior, package payload/catalog coverage, live PnPUtil deletion, or recovery from an export. These require snapshots and explicit approval in an isolated Windows 10/11 VM with suitable GPUs or pass-through devices.
 
 ## Suggested isolated validation
 
@@ -179,5 +180,5 @@ Use the detailed [Windows 11 validation checklist](WINDOWS11_VALIDATION.md) to r
 2. Run A01–A15 with separate snapshots for absent, DWORD 0, DWORD 1, malformed backup, denied registry access, cancelled UAC, external policy change, and reboot cases. Confirm security and cumulative update settings remain unchanged.
 3. On suitable physical or pass-through NVIDIA, AMD, and Intel hardware, compare inspection output with Device Manager, `Win32_PnPSignedDriver`, SetupAPI.dev.log, and Windows Update history. Include hybrid systems and missing history.
 4. Use only a vendor package whose EXE and extracted INF pass signature and hardware checks. Create a restore point, run the interactive installer, restart if required, and confirm DriverGuard's observed INF/version and device status.
-5. For cleanup, verify every device using the old INF is absent before confirming. Check the export and deletion result. Separately test active/shared package refusal. Restore the VM snapshot after each disruptive scenario.
+5. For cleanup, verify every device using the old INF is absent before confirming. Check the export's original INF against the installed old `oem#.inf`, its Display metadata and catalogs, then check the deletion result. Separately test active/shared package refusal and recovery using the retained export. Restore the VM snapshot after each disruptive scenario.
 6. Record actual results by Windows edition/build. Do not infer Home policy enforcement from a registry readback.

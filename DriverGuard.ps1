@@ -797,6 +797,42 @@ function Get-DeviceUsageInventory {
     }
     return $inventory.ToArray()
 }
+function Assert-CleanupExport($Package,[string]$SourceInf,[string]$Export) {
+    $original = [IO.Path]::GetFileName([string]$Package.OriginalInf)
+    if ($original -notmatch '^[A-Za-z0-9_.-]+\.inf$' -or -not (Test-Path -LiteralPath $SourceInf -PathType Leaf)) {
+        throw 'Old package INF identity or installed INF is unavailable; deletion refused.'
+    }
+    $items = @(Get-ChildItem -LiteralPath $Export -Recurse -Force -ErrorAction Stop)
+    if ($items.Count -eq 0 -or @($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
+        throw 'Export is empty or contains a linked path; deletion refused.'
+    }
+    $files = @($items | Where-Object { -not $_.PSIsContainer })
+    if ($files.Count -eq 0 -or @($files | Where-Object { $_.Length -eq 0 }).Count -gt 0) {
+        throw 'Export has missing or empty package files; deletion refused.'
+    }
+    $infs = @($files | Where-Object { $_.Name -ieq $original })
+    if ($infs.Count -ne 1 -or (Get-FileHash -LiteralPath $infs[0].FullName -Algorithm SHA256).Hash -ne
+        (Get-FileHash -LiteralPath $SourceInf -Algorithm SHA256).Hash) {
+        throw 'Exported INF does not uniquely match the installed old package; deletion refused.'
+    }
+    $content = Get-Content -LiteralPath $infs[0].FullName -Raw -Encoding Default -ErrorAction Stop
+    $version = [regex]::Match($content,'(?ims)^\s*\[Version\]\s*$\r?\n(.*?)(?=^\s*\[|\z)').Groups[1].Value
+    if ($version -notmatch '(?im)^\s*Class\s*=\s*Display\s*(?:;.*)?$') {
+        throw 'Exported INF is not a Display package; deletion refused.'
+    }
+    $catalogs = @([regex]::Matches($version,'(?im)^\s*CatalogFile(?:\.[^=\s]+)?\s*=\s*([^;\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim().Trim('"') })
+    if ($catalogs.Count -eq 0) { throw 'Exported INF has no catalog reference; deletion refused.' }
+    foreach ($catalog in $catalogs) {
+        if ($catalog -notmatch '^[A-Za-z0-9_.-]+\.cat$') { throw 'Exported INF catalog is invalid; deletion refused.' }
+        $matchingCatalog = @($files | Where-Object { $_.DirectoryName -ieq $infs[0].DirectoryName -and $_.Name -ieq $catalog -and $_.Length -gt 0 })
+        if ($matchingCatalog.Count -ne 1) {
+            throw 'Exported INF catalog is missing or invalid; deletion refused.'
+        }
+        if ((Get-AuthenticodeSignature -LiteralPath $matchingCatalog[0].FullName).Status -ne 'Valid') {
+            throw 'Exported INF catalog signature is not valid; deletion refused.'
+        }
+    }
+}
 function Cleanup-GpuDriver {
     $null = Assert-Windows
     if (Request-Elevation 'Cleanup') { return }
@@ -813,13 +849,16 @@ function Cleanup-GpuDriver {
     Write-Host "Active replacement: $($gpu[0].Inf), version $($gpu[0].Version)."
     Write-Host 'DriverGuard will export this specific old package, then request a non-forced PnPUtil deletion.'
     if (-not (Confirm-Yes "Remove only $($journal.OldInf)?")) { Write-Host 'Cancelled.'; return }
-    $reason = Test-CleanupEligibility $journal (@(Get-Gpus | Where-Object { $_.InstanceId -eq $journal.InstanceId }) | Select-Object -First 1) @(Get-DriverPackages) @(Get-DeviceUsageInventory)
+    $currentPackages = @(Get-DriverPackages)
+    $reason = Test-CleanupEligibility $journal (@(Get-Gpus | Where-Object { $_.InstanceId -eq $journal.InstanceId }) | Select-Object -First 1) $currentPackages @(Get-DeviceUsageInventory)
     if ($reason -or (Test-PendingRestart)) { throw "Cleanup conditions changed: $reason" }
     $export = Join-Path $script:DataDir ("export-$($journal.OldInf)-" + (Get-Date -Format 'yyyyMMddHHmmss'))
     Protect-DataDirectory
     New-Item -ItemType Directory -Path $export -ErrorAction Stop | Out-Null
     & pnputil.exe /export-driver $journal.OldInf $export | Out-Host
-    if ($LASTEXITCODE -ne 0 -or @(Get-ChildItem -LiteralPath $export -Recurse -File -ErrorAction Stop).Count -eq 0) { throw 'Specific package export failed; deletion refused.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Specific package export failed; deletion refused.' }
+    $oldPackage = @($currentPackages | Where-Object { $_.Inf -eq $journal.OldInf })[0]
+    Assert-CleanupExport $oldPackage (Join-Path $env:windir "INF\$($journal.OldInf)") $export
     Write-Log 'GPU cleanup' 'EXPORTED' "INF=$($journal.OldInf); destination=$export"
     & pnputil.exe /delete-driver $journal.OldInf | Out-Host
     $code=$LASTEXITCODE
