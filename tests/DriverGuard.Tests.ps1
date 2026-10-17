@@ -412,6 +412,12 @@ $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
 Check ($report -match 'Policy:' -and $report -match 'GPU:' -and $report -match 'Driver store association:' -and $report -match 'Provenance:') 'Read-only diagnostics report required sources'
 Check ($report -match 'Diagnose result: COMPLETE \(exit 0\)' -and $report -match '(?m)^0\s*$') 'Complete diagnostics return exit code zero'
 Check ($script:logEntries.Count -eq $beforeLogs) 'Read-only diagnostics writes no activity log'
+$script:currentGpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A'
+$script:currentGpu.Provider=''; $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'provider=UNKNOWN' -and $report -match 'Active driver provider unavailable' -and $report -match 'Diagnose result: PARTIAL \(exit 2\)') 'Missing active provider is explicit and makes diagnostics partial'
+$script:currentGpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A'
+$script:currentGpu.Version=''; $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
+Check ($report -match 'version=UNKNOWN' -and $report -match 'Active driver version unavailable' -and $report -match 'Diagnose result: PARTIAL \(exit 2\)') 'Missing active version is explicit and makes diagnostics partial'
 $script:currentGpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A' ''
 $report=Show-ReadOnlyDiagnostics 6>&1 | Out-String
 Check ($report -match 'SetupAPI: UNAVAILABLE - active device INF is unverified' -and $report -match 'Diagnose result: PARTIAL \(exit 2\)') 'Unverified active INF does not masquerade as missing SetupAPI record'

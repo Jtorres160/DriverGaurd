@@ -1,5 +1,9 @@
 # Testing
 
+## Phase 5 active driver metadata reporting — October 17, 2026
+
+`Diagnose` now returns PARTIAL (`2`) when an enumerated supported GPU lacks the signed-driver provider or version, and displays the missing field as UNKNOWN. The targeted synthetic cases passed as part of the 143/143 suite. Windows PowerShell 5.1 parsed `DriverGuard.ps1` and both test scripts with zero errors. The read-only host harness also passed its snapshot self-check and embedded suite; native Diagnose returned `2` because structured driver-store inventory required elevation. It reported one NVIDIA RTX 4080 SUPER with active `oem23.inf`, NVIDIA provider, version `32.0.16.1742`, and UNKNOWN provenance. Monitored policy and DriverGuard state snapshots were unchanged. No Phase 4 test, elevation, registry change, driver operation, or reboot was performed. Physical vendor/hybrid/disconnected coverage and real installation-source ground truth remain open.
+
 ## Phase 4B unsafe Active backup ACL — October 16, 2026
 
 **PASS, independently verified exported native VMware evidence.** The capture identifies Windows 11 Home build 26300, elevated VMware guest `DESKTOP-F4E2JLQ`, and tested HEAD `83f2543232c7da4f0fbe96dd8bf77d7f66565224`. Capture time is October 17 UTC (October 16 in America/Los_Angeles). Read-only verification of the shared export found **36 files**, versus the reported 35; the original-to-export SHA-256 comparison is tester-reported, not independently repeated against the secure guest originals. No raw recovery records, registry exports, or machine-specific security descriptors are committed.

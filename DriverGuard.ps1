@@ -562,6 +562,8 @@ function Show-ReadOnlyDiagnostics {
     foreach ($gpu in $gpus) {
         Write-Host "GPU: $($gpu.Vendor) | $($gpu.Model) | $($gpu.InstanceId) | status=$($gpu.Status)"
         Write-Host "  Active driver: INF=$(if ($gpu.Inf) {$gpu.Inf} else {'UNVERIFIED'}) ($($gpu.InfSource)) provider=$(if ($gpu.Provider) {$gpu.Provider} else {'UNKNOWN'}) version=$(if ($gpu.Version) {$gpu.Version} else {'UNKNOWN'}) date=$(if ($gpu.Date) {$gpu.Date} else {'UNKNOWN'})"
+        if (-not $gpu.Provider) { $limitations.Add("Active driver provider unavailable for $($gpu.InstanceId)") }
+        if (-not $gpu.Version) { $limitations.Add("Active driver version unavailable for $($gpu.InstanceId)") }
         if ($packagesAvailable) {
             $associated=@($packages | Where-Object { $_.Inf -eq $gpu.Inf })
             Write-Host "  Driver store association: $(if ($associated.Count -eq 1) {"UNIQUE | original=$($associated[0].OriginalInf)"} elseif ($associated.Count -eq 0) {'NO MATCH'} else {'AMBIGUOUS'})"
