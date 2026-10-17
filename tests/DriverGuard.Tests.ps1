@@ -44,6 +44,10 @@ Check ((Get-GpuVendor 'PCI\VEN_10DE&DEV_1234\A') -eq 'NVIDIA') 'NVIDIA vendor de
 Check ((Get-GpuVendor 'PCI\VEN_1002&DEV_1234\A') -eq 'AMD') 'AMD vendor detection'
 Check ((Get-GpuVendor 'PCI\VEN_8086&DEV_1234\A') -eq 'Intel') 'Intel integrated vendor detection'
 Check ((Get-GpuVendor 'ROOT\DISPLAY\1') -eq $null) 'Nonphysical display excluded'
+Check ((Get-OfficialDriverDownloadPage 'NVIDIA') -eq 'https://www.nvidia.com/Download/index.aspx') 'NVIDIA official download guidance uses vendor domain'
+Check ((Get-OfficialDriverDownloadPage 'AMD') -eq 'https://www.amd.com/en/support/download/drivers.html') 'AMD official download guidance uses vendor domain'
+Check ((Get-OfficialDriverDownloadPage 'Intel') -eq 'https://www.intel.com/content/www/us/en/download-center/home.html') 'Intel official download guidance uses vendor domain'
+Throws { Get-OfficialDriverDownloadPage 'Unknown' } 'Unsupported vendor receives no invented official download page'
 
 $script:testEntities = @(
     [pscustomobject]@{ PNPClass='Display'; PNPDeviceID='PCI\VEN_8086&DEV_1234\I'; Name='Intel UHD'; Status='OK' },
@@ -69,6 +73,8 @@ function Get-PnpDeviceProperty { param([string]$InstanceId,[string]$KeyName) thr
 Check (@(Get-Gpus | Where-Object { $_.Vendor -eq 'NVIDIA' })[0].Inf -eq 'oem3.inf') 'Signed-driver binding remains available when PnP property is unavailable'
 
 $gpu=New-Gpu 'NVIDIA' 'PCI\VEN_10DE&DEV_1234\A'
+$guidance=Show-OfficialDriverGuidance $gpu 6>&1 | Out-String
+Check ($guidance -match 'Official NVIDIA driver downloads: https://www\.nvidia\.com/Download/index\.aspx' -and $guidance -match 'system manufacturer' -and $guidance -match 'does not prove where the file was downloaded') 'Install guidance explains official source, OEM choice, and signature limits'
 $unknown=Classify-Origin $gpu @() @() @() $null
 Check ($unknown.Classification -eq 'UNKNOWN') 'Missing Windows Update history yields unknown'
 $providerOnly=Classify-Origin $gpu @([pscustomobject]@{ Title='NVIDIA Display Driver'; Date=(Get-Date) }) @() @() $null
@@ -400,8 +406,10 @@ $script:currentGpu=$gpu
 function Select-Gpu { return $script:currentGpu }
 function Read-Host { param([string]$Prompt) if ($Prompt -match 'INF') { return $inf }; return $exe }
 function Test-InstallerCompatibility { param($Gpu,[string]$Installer,[string]$InfPath) [pscustomobject]@{ Installer=$exe; InfPath=$inf; Version='2.0'; InstallerHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash; InfHash=(Get-FileHash -LiteralPath $inf -Algorithm SHA256).Hash; Signer='NVIDIA' } }
+function Show-OfficialDriverGuidance($Gpu) { $script:shownGuidanceVendor=$Gpu.Vendor }
 function Start-Process { param([string]$FilePath,[switch]$Wait,[switch]$PassThru) [pscustomobject]@{ ExitCode=5 } }
 Throws { Install-GpuDriver } 'Failed manufacturer installer exit reported'
+Check ($script:shownGuidanceVendor -eq 'NVIDIA') 'Guided install presents vendor download guidance for the selected GPU'
 Check ($script:testJournal.State -eq 'Failed' -and @($script:logEntries | Where-Object { $_ -match 'GPU install\|FAILED' }).Count -gt 0) 'Failed install journal and log recorded'
 
 function Get-OS { [pscustomobject]@{ Name='Windows Test'; Version='10.0'; Build=22631 } }

@@ -677,6 +677,20 @@ function Select-Gpu {
     if (-not [int]::TryParse($answer,[ref]$number) -or $number -lt 1 -or $number -gt $gpus.Count) { throw 'Invalid GPU selection.' }
     return $gpus[$number-1]
 }
+function Get-OfficialDriverDownloadPage([string]$Vendor) {
+    switch ($Vendor) {
+        'NVIDIA' { return 'https://www.nvidia.com/Download/index.aspx' }
+        'AMD' { return 'https://www.amd.com/en/support/download/drivers.html' }
+        'Intel' { return 'https://www.intel.com/content/www/us/en/download-center/home.html' }
+        default { throw 'No official driver download page is defined for this vendor.' }
+    }
+}
+function Show-OfficialDriverGuidance($Gpu) {
+    $page = Get-OfficialDriverDownloadPage ([string]$Gpu.Vendor)
+    Write-Host "Official $($Gpu.Vendor) driver downloads: $page"
+    Write-Host 'Choose a package for this exact GPU and Windows version. For laptops or branded systems, check the system manufacturer for its recommended package first.'
+    Write-Host 'A valid signature verifies signer and file integrity; it does not prove where the file was downloaded. DriverGuard will still validate signatures and the extracted INF match before installation.'
+}
 function Install-GpuDriver {
     $null = Assert-Windows
     if (Request-Elevation 'Install') { return }
@@ -685,6 +699,7 @@ function Install-GpuDriver {
     if ($gpu.Inf -notmatch '^oem\d+\.inf$') { throw 'Current installed INF cannot be identified as an exportable third-party package.' }
     $packages = @(Get-DriverPackages | Where-Object { $_.Inf -eq $gpu.Inf })
     if ($packages.Count -ne 1) { throw 'Current Display package cannot be identified uniquely.' }
+    Show-OfficialDriverGuidance $gpu
     $installer = Read-Host 'Full path to the manufacturer installer EXE'
     $inf = Read-Host 'Full path to its extracted matching Display INF'
     $checked = Test-InstallerCompatibility $gpu $installer $inf
