@@ -1,14 +1,19 @@
 # Changelog
 
+## Phase 4B unsafe-ACL evidence verification — 2026-10-16
+
+- Independently verified exported VMware evidence: file-specific unsafe Active recovery ACL refusal, exit `1`, unchanged registry exports and recovery bytes/hash, restored original file descriptor, and preserved directory descriptor. PASS for this branch.
+- Export contains 36 files versus reported 35; original/export equality and live post-test observations remain tester-reported. Phase 4A/4B remain partial; Windows Update enforcement unverified. No live test repeated or application code changed. See [TESTING.md](TESTING.md).
+
 ## Phase 4B malformed-file validation — 2026-10-16
 
 - Recorded live VMware PASS for Restore refusal before confirmation with an Active recovery file replaced by `INVALID_TEST_RECORD`; returning the saved Active file allowed normal Restore to DWORD `0`/valid `Restored`.
-- Other malformed-file variants and unsafe-permission Restore remain open. Phase 4 remains partial and Windows Update enforcement unverified. No application code changed.
+- Other malformed-file variants remain open; the later file-specific unsafe-ACL refusal passed. Phase 4 remains partial and Windows Update enforcement unverified. No application code changed.
 
 ## Phase 4B missing-file validation — 2026-10-16
 
 - Recorded live VMware PASS: Restore refused a missing Active recovery file before confirmation; after the saved file was returned, normal Restore recovered the recorded DWORD `0` baseline and valid `Restored` state.
-- A later `INVALID_TEST_RECORD` Restore refusal passed; other malformed and unsafe-permission cases remain open. Windows Update enforcement remains unverified. No application code changed.
+- A later `INVALID_TEST_RECORD` Restore refusal passed; other malformed variants remain open; the later file-specific unsafe-ACL refusal passed. Windows Update enforcement remains unverified. No application code changed.
 
 ## Phase 4 cancellation and reboot follow-up — 2026-10-16
 

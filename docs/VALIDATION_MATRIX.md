@@ -1,10 +1,16 @@
 # Validation matrix
 
+## Phase 4B unsafe Active backup ACL — October 16, 2026
+
+**PASS for the tested native VMware file-specific unsafe-write ACL refusal.** Read-only inspection of exported evidence at tested HEAD `83f2543232c7da4f0fbe96dd8bf77d7f66565224` confirms Restore exit `1`, refusal naming the primary recovery file, identical five registry exports (DWORD `1`), identical 200-byte recovery captures/hash (Active, original DWORD `0`), restored original file descriptor, and unchanged directory descriptor. The injected Builtin Users write ACE remained through the refused Restore. Result, cleanup, and termination artifacts report success and confirmed child termination without critical manual intervention. Stderr contains only its BOM; stdout also reports activity-log refusal at the unsafe file.
+
+Final evidence agrees with tester-reported `EXCLUSION CONFIGURED`, `VALID (Active)`, DWORD `1`, and the live recovery hash. There are 36 exported files versus reported 35; original/export equality remains tester-reported. Snapshot restorability is not independently guest-verified. Capture time is October 17 UTC / October 16 Pacific. See [detailed evidence verification](../TESTING.md) for hash and comparison details. No completed live test was repeated. Phase 4A/4B remain **PARTIAL** and Windows Update enforcement **UNVERIFIED**; other malformed/ACL variants remain open.
+
 ## Phase 4B malformed Active record — October 16, 2026
 
 | Case | Live VMware evidence | Status and limit |
 |---|---|---|
-| Active/DWORD `1`; primary record replaced with `INVALID_TEST_RECORD` | Restore refused “Recovery backup is malformed.” before confirmation; Status showed `CORRUPT` and external change `Unknown`. Returning the saved Active file restored valid Status, and normal Restore independently verified DWORD `0`/`Restored` | PASS for this invalid-text refusal and recovery workflow on Windows 11 Home build 26300. Other malformed-record variants and unsafe permissions remain untested live |
+| Active/DWORD `1`; primary record replaced with `INVALID_TEST_RECORD` | Restore refused “Recovery backup is malformed.” before confirmation; Status showed `CORRUPT` and external change `Unknown`. Returning the saved Active file restored valid Status, and normal Restore independently verified DWORD `0`/`Restored` | PASS for this invalid-text refusal and recovery workflow on Windows 11 Home build 26300. Other malformed-record variants remain untested live; the later file-specific unsafe-ACL refusal above passed |
 
 Phase 4 remains **PARTIAL** and Windows Update enforcement **UNVERIFIED**. Remaining safety checks are in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md).
 
@@ -12,7 +18,7 @@ Phase 4 remains **PARTIAL** and Windows Update enforcement **UNVERIFIED**. Remai
 
 | Case | Live VMware evidence | Status and limit |
 |---|---|---|
-| Active/DWORD `1` with primary recovery file renamed | `-Action Restore` refused “No recovery backup exists. Original configuration cannot be inferred.” before confirmation; returning the saved file restored valid `Active` Status, then normal Restore independently verified DWORD `0` and ended `VALID (Restored)` | PASS for missing-file refusal and recovery workflow on Windows 11 Home build 26300; later `INVALID_TEST_RECORD` Restore also passed. Other malformed/unsafe variants remain untested live. No file hashes or exit codes supplied |
+| Active/DWORD `1` with primary recovery file renamed | `-Action Restore` refused “No recovery backup exists. Original configuration cannot be inferred.” before confirmation; returning the saved file restored valid `Active` Status, then normal Restore independently verified DWORD `0` and ended `VALID (Restored)` | PASS for missing-file refusal and recovery workflow on Windows 11 Home build 26300; later `INVALID_TEST_RECORD` Restore also passed. Other malformed variants remain untested live; the later file-specific unsafe-ACL refusal above passed. No file hashes or exit codes supplied |
 
 Windows Update enforcement remains **UNVERIFIED**. Other Phase 4 safety checks are in [WINDOWS11_VALIDATION.md](../WINDOWS11_VALIDATION.md).
 
