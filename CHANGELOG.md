@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased — GPU driver workflow development — 2026-10-17
+
+- Phase 5: Diagnose reports PARTIAL when an enumerated GPU lacks its active driver provider or version; unavailable fields display UNKNOWN. Native read-only coverage includes one NVIDIA RTX 4080 SUPER and a VMware guest with no supported physical GPU. AMD, Intel, and mixed-device coverage remain pending.
+- Phase 6: a nearby model-matching Windows Update history title no longer promotes a newer unmarked device/active-INF installation to probable Windows Update. Real installation-source accuracy remains unverified without independently labeled cases.
+- Phase 7: guided installation displays official vendor download pages and package-selection guidance. Before installer launch, the current package export must pass exact INF, Display class, and catalog checks; inconclusive backup evidence stops installation.
+- Phase 8: optional cleanup applies the same export verification before targeted, non-forced deletion of the journal-recorded old package. Real installation, deletion, and recovery validation remain pending suitable isolated hardware and explicit approval.
+
 ## Phase 4B unsafe-ACL evidence verification — 2026-10-16
 
 - Independently verified exported VMware evidence: file-specific unsafe Active recovery ACL refusal, exit `1`, unchanged registry exports and recovery bytes/hash, restored original file descriptor, and preserved directory descriptor. PASS for this branch.

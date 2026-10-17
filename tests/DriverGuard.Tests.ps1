@@ -438,7 +438,6 @@ $script:DataDir=Join-Path $tmp 'cleanup-valid'
 $script:exportMode='valid'
 Cleanup-GpuDriver | Out-Null
 Check (-not $script:packagePresent -and @($script:pnputilCalls | Where-Object { $_ -eq '/delete-driver oem1.inf' }).Count -eq 1) 'Verified export permits targeted cleanup without force or uninstall flags'
-$env:windir=$savedWindir
 
 $script:packagePresent=$true
 $script:currentGpu=$gpu
@@ -446,10 +445,25 @@ function Select-Gpu { return $script:currentGpu }
 function Read-Host { param([string]$Prompt) if ($Prompt -match 'INF') { return $inf }; return $exe }
 function Test-InstallerCompatibility { param($Gpu,[string]$Installer,[string]$InfPath) [pscustomobject]@{ Installer=$exe; InfPath=$inf; Version='2.0'; InstallerHash=(Get-FileHash -LiteralPath $exe -Algorithm SHA256).Hash; InfHash=(Get-FileHash -LiteralPath $inf -Algorithm SHA256).Hash; Signer='NVIDIA' } }
 function Show-OfficialDriverGuidance($Gpu) { $script:shownGuidanceVendor=$Gpu.Vendor }
-function Start-Process { param([string]$FilePath,[switch]$Wait,[switch]$PassThru) [pscustomobject]@{ ExitCode=5 } }
+$script:installerLaunches=0
+function Start-Process { param([string]$FilePath,[switch]$Wait,[switch]$PassThru) $script:installerLaunches++; [pscustomobject]@{ ExitCode=5 } }
+foreach ($mode in @('unrelated','mismatch','missing-catalog','bad-signature')) {
+    $script:DataDir=Join-Path $tmp "preinstall-$mode"
+    [IO.Directory]::CreateDirectory($script:DataDir) | Out-Null
+    $script:exportMode=$mode
+    $script:testJournal=$null
+    $refusal=''
+    try { Install-GpuDriver | Out-Null } catch { $refusal=$_.Exception.Message }
+    Check ($refusal -match 'installation not started' -and $refusal -like "*$($exportReasons[$mode])*") "Install refuses $mode old-package export"
+    Check ($script:installerLaunches -eq 0 -and $null -eq $script:testJournal) "No installer launch or journal after $mode export"
+}
+$script:DataDir=Join-Path $tmp 'preinstall-valid'
+[IO.Directory]::CreateDirectory($script:DataDir) | Out-Null
+$script:exportMode='valid'
 Throws { Install-GpuDriver } 'Failed manufacturer installer exit reported'
 Check ($script:shownGuidanceVendor -eq 'NVIDIA') 'Guided install presents vendor download guidance for the selected GPU'
-Check ($script:testJournal.State -eq 'Failed' -and @($script:logEntries | Where-Object { $_ -match 'GPU install\|FAILED' }).Count -gt 0) 'Failed install journal and log recorded'
+Check ($script:installerLaunches -eq 1 -and $script:testJournal.State -eq 'Failed' -and @($script:logEntries | Where-Object { $_ -match 'GPU install\|FAILED' }).Count -gt 0) 'Verified old-package export precedes mocked installer launch and failed journal'
+$env:windir=$savedWindir
 
 function Get-OS { [pscustomobject]@{ Name='Windows Test'; Version='10.0'; Build=22631 } }
 function Test-Admin { return $false }

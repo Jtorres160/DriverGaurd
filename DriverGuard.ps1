@@ -713,7 +713,9 @@ function Install-GpuDriver {
     $oldExport = Join-Path $script:DataDir ("preinstall-$($gpu.Inf)-" + (Get-Date -Format 'yyyyMMddHHmmss'))
     New-Item -ItemType Directory -Path $oldExport -ErrorAction Stop | Out-Null
     & pnputil.exe /export-driver $gpu.Inf $oldExport | Out-Host
-    if ($LASTEXITCODE -ne 0 -or @(Get-ChildItem -LiteralPath $oldExport -Recurse -File -ErrorAction Stop).Count -eq 0) { throw 'Current package export failed; installation not started.' }
+    if ($LASTEXITCODE -ne 0) { throw 'Current package export failed; installation not started.' }
+    try { Assert-DriverPackageExport $packages[0] (Join-Path $env:windir "INF\$($gpu.Inf)") $oldExport }
+    catch { throw "Current package export could not be verified; installation not started. $($_.Exception.Message)" }
     Write-Log 'GPU install' 'EXPORTED' "INF=$($gpu.Inf); destination=$oldExport"
     $journal = [pscustomobject]@{
         Schema=1; State='Started'; InstanceId=$gpu.InstanceId; Vendor=$gpu.Vendor; Model=$gpu.Model
@@ -797,39 +799,39 @@ function Get-DeviceUsageInventory {
     }
     return $inventory.ToArray()
 }
-function Assert-CleanupExport($Package,[string]$SourceInf,[string]$Export) {
+function Assert-DriverPackageExport($Package,[string]$SourceInf,[string]$Export) {
     $original = [IO.Path]::GetFileName([string]$Package.OriginalInf)
     if ($original -notmatch '^[A-Za-z0-9_.-]+\.inf$' -or -not (Test-Path -LiteralPath $SourceInf -PathType Leaf)) {
-        throw 'Old package INF identity or installed INF is unavailable; deletion refused.'
+        throw 'Old package INF identity or installed INF is unavailable.'
     }
     $items = @(Get-ChildItem -LiteralPath $Export -Recurse -Force -ErrorAction Stop)
     if ($items.Count -eq 0 -or @($items | Where-Object { $_.Attributes -band [IO.FileAttributes]::ReparsePoint }).Count -gt 0) {
-        throw 'Export is empty or contains a linked path; deletion refused.'
+        throw 'Export is empty or contains a linked path.'
     }
     $files = @($items | Where-Object { -not $_.PSIsContainer })
     if ($files.Count -eq 0 -or @($files | Where-Object { $_.Length -eq 0 }).Count -gt 0) {
-        throw 'Export has missing or empty package files; deletion refused.'
+        throw 'Export has missing or empty package files.'
     }
     $infs = @($files | Where-Object { $_.Name -ieq $original })
     if ($infs.Count -ne 1 -or (Get-FileHash -LiteralPath $infs[0].FullName -Algorithm SHA256).Hash -ne
         (Get-FileHash -LiteralPath $SourceInf -Algorithm SHA256).Hash) {
-        throw 'Exported INF does not uniquely match the installed old package; deletion refused.'
+        throw 'Exported INF does not uniquely match the installed old package.'
     }
     $content = Get-Content -LiteralPath $infs[0].FullName -Raw -Encoding Default -ErrorAction Stop
     $version = [regex]::Match($content,'(?ims)^\s*\[Version\]\s*$\r?\n(.*?)(?=^\s*\[|\z)').Groups[1].Value
     if ($version -notmatch '(?im)^\s*Class\s*=\s*Display\s*(?:;.*)?$') {
-        throw 'Exported INF is not a Display package; deletion refused.'
+        throw 'Exported INF is not a Display package.'
     }
     $catalogs = @([regex]::Matches($version,'(?im)^\s*CatalogFile(?:\.[^=\s]+)?\s*=\s*([^;\r\n]+)') | ForEach-Object { $_.Groups[1].Value.Trim().Trim('"') })
-    if ($catalogs.Count -eq 0) { throw 'Exported INF has no catalog reference; deletion refused.' }
+    if ($catalogs.Count -eq 0) { throw 'Exported INF has no catalog reference.' }
     foreach ($catalog in $catalogs) {
-        if ($catalog -notmatch '^[A-Za-z0-9_.-]+\.cat$') { throw 'Exported INF catalog is invalid; deletion refused.' }
+        if ($catalog -notmatch '^[A-Za-z0-9_.-]+\.cat$') { throw 'Exported INF catalog is invalid.' }
         $matchingCatalog = @($files | Where-Object { $_.DirectoryName -ieq $infs[0].DirectoryName -and $_.Name -ieq $catalog -and $_.Length -gt 0 })
         if ($matchingCatalog.Count -ne 1) {
-            throw 'Exported INF catalog is missing or invalid; deletion refused.'
+            throw 'Exported INF catalog is missing or invalid.'
         }
         if ((Get-AuthenticodeSignature -LiteralPath $matchingCatalog[0].FullName).Status -ne 'Valid') {
-            throw 'Exported INF catalog signature is not valid; deletion refused.'
+            throw 'Exported INF catalog signature is not valid.'
         }
     }
 }
@@ -858,7 +860,8 @@ function Cleanup-GpuDriver {
     & pnputil.exe /export-driver $journal.OldInf $export | Out-Host
     if ($LASTEXITCODE -ne 0) { throw 'Specific package export failed; deletion refused.' }
     $oldPackage = @($currentPackages | Where-Object { $_.Inf -eq $journal.OldInf })[0]
-    Assert-CleanupExport $oldPackage (Join-Path $env:windir "INF\$($journal.OldInf)") $export
+    try { Assert-DriverPackageExport $oldPackage (Join-Path $env:windir "INF\$($journal.OldInf)") $export }
+    catch { throw "Old package export could not be verified; deletion refused. $($_.Exception.Message)" }
     Write-Log 'GPU cleanup' 'EXPORTED' "INF=$($journal.OldInf); destination=$export"
     & pnputil.exe /delete-driver $journal.OldInf | Out-Host
     $code=$LASTEXITCODE

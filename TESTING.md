@@ -165,12 +165,13 @@ Additional mocked checks passed for invalid registry type, reenable after verifi
 | Manufacturer replacement | New INF/version running | Post-restart verification mock passed | Pass, mocked |
 | Safe obsolete cleanup | Eligible only when unique and unused; export tied to old installed INF before deletion | Eligibility, valid export, and targeted non-forced command mock passed | Pass, mocked |
 | Invalid cleanup export | Refuse before deletion | Unrelated nonempty file, INF hash mismatch, missing/empty/invalidly signed catalog, missing installed INF, and wrong class mocked | Pass, mocked |
+| Invalid pre-install export | Refuse before installer launch or install journal | Unrelated nonempty file, INF hash mismatch, missing catalog, and invalid catalog signature mocked | Pass, mocked |
 | Active/shared driver refusal | Refused | Mock passed | Pass, mocked |
 | Hidden/disconnected device usage | Refused | Mock passed | Pass, mocked |
 | Unreadable device usage | Refused | Mock passed | Pass, mocked |
 | Detection and logging after reboot | Correct active INF logged | Mock passed | Pass, mocked |
 
-No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, vendor installer behavior, package payload/catalog coverage, live PnPUtil deletion, or recovery from an export. These require snapshots and explicit approval in an isolated Windows 10/11 VM with suitable GPUs or pass-through devices.
+No disruptive real-GPU or real-registry test was run. The suite does not establish actual Windows Update provenance accuracy, native pre-install export behavior, vendor installer behavior, package payload/catalog coverage, live PnPUtil deletion, or recovery from an export. These require snapshots and explicit approval on isolated Windows 10/11 hardware with suitable GPUs or a VM with suitable pass-through devices.
 
 ## Suggested isolated validation
 
